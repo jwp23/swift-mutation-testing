@@ -31,3 +31,13 @@ if command -v bd >/dev/null 2>&1; then
   if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
 fi
 # --- END BEADS INTEGRATION v1.2.2 ---
+
+# --- BEGIN CHAINED: pre-commit framework (.pre-commit-config.yaml) ---
+# Kept outside the BEADS markers so `bd hooks install` upgrades don't remove it.
+# Runs whatever `pre-commit install` last generated at .git/hooks/pre-commit.
+_repo_root="$(git rev-parse --show-toplevel)"
+if [ -x "$_repo_root/.git/hooks/pre-commit" ]; then
+  "$_repo_root/.git/hooks/pre-commit" "$@"
+  exit $?
+fi
+# --- END CHAINED: pre-commit framework ---
