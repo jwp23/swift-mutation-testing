@@ -457,4 +457,25 @@ struct CacheStoreTests {
         #expect(!diff.hasChanges)
     }
 
+    @Test(
+        "Given killer test file resolved as an absolute path, when invalidated against a relative changed path, then entry is removed"
+    )
+    func invalidateNormalizesAbsoluteKillerTestFilePath() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let store = CacheStore(
+            storePath: dir.appendingPathComponent("cache.json").path, projectPath: dir.path
+        )
+        let key = makeMutantCacheKey(utf8Offset: 40)
+        let absoluteKillerTestFile = dir.appendingPathComponent("Tests/FooTests.swift").path
+        await store.store(
+            status: .killed(by: "FooTests.test"), for: key, killerTestFile: absoluteKillerTestFile)
+
+        let diff = TestFileDiff(added: [], modified: ["Tests/FooTests.swift"], removed: [])
+        await store.invalidate(diff: diff)
+
+        #expect(await store.result(for: key) == nil)
+    }
+
 }

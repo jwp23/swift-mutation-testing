@@ -2,8 +2,10 @@ import Foundation
 
 actor CacheStore {
 
-    init(storePath: String) {
+    init(storePath: String, projectPath: String? = nil, noCache: Bool = false) {
         self.storePath = storePath
+        self.projectPath = projectPath
+        self.noCache = noCache
         self.entries = [:]
         self.killerTestFiles = [:]
     }
@@ -11,6 +13,8 @@ actor CacheStore {
     static let directoryName = ".swift-mutation-testing-cache"
 
     private let storePath: String
+    private let projectPath: String?
+    private let noCache: Bool
     private var entries: [MutantCacheKey: ExecutionStatus]
     private var killerTestFiles: [MutantCacheKey: String]
 
@@ -40,8 +44,16 @@ actor CacheStore {
     func store(status: ExecutionStatus, for key: MutantCacheKey, killerTestFile: String? = nil) {
         entries[key] = status
         if let killerTestFile {
-            killerTestFiles[key] = killerTestFile
+            killerTestFiles[key] = relativePath(for: killerTestFile)
         }
+    }
+
+    /// Normalizes an absolute killer test file path to the project-relative form used by
+    /// `testFileHashes` keys, so invalidation can compare like with like (issue #67).
+    /// Paths that are already relative, or that fall outside `projectPath`, pass through unchanged.
+    private func relativePath(for path: String) -> String {
+        guard let projectPath else { return path }
+        return PathRelativizer.relativePath(for: path, relativeTo: projectPath)
     }
 
     func load() throws {
@@ -61,6 +73,8 @@ actor CacheStore {
     }
 
     func persist() throws {
+        guard !noCache else { return }
+
         let cacheEntries = entries.map {
             CacheEntry(key: $0.key, status: $0.value, killerTestFile: killerTestFiles[$0.key])
         }
@@ -81,6 +95,8 @@ actor CacheStore {
     }
 
     func persistMetadata(_ metadata: CacheMetadata) throws {
+        guard !noCache else { return }
+
         let data = try JSONEncoder().encode(metadata)
         let url = URL(fileURLWithPath: metadataPath)
         try FileManager.default.createDirectory(

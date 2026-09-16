@@ -134,6 +134,43 @@ struct MutantExecutorTests {
         #expect(results.isEmpty)
     }
 
+    @Test("Given noCache is true, when execute called, then no cache file is written to disk")
+    func noCacheTrueDoesNotWriteCacheFile() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let sourceFile = dir.appendingPathComponent("Foo.swift")
+        try "let x = true".write(to: sourceFile, atomically: true, encoding: .utf8)
+
+        let executor = MutantExecutor(
+            configuration: makeRunnerConfiguration(projectPath: dir.path, noCache: true),
+            launcher: MockProcessLauncher(exitCode: 1)
+        )
+        let mutant = makeMutantDescriptor(
+            id: "m0",
+            filePath: sourceFile.path,
+            originalText: "true",
+            mutatedText: "false",
+            operatorIdentifier: "BooleanLiteralReplacement",
+            replacementKind: .booleanLiteral,
+            description: "true → false",
+            isSchematizable: true,
+            mutatedSourceContent: "let x = false"
+        )
+        let input = makeRunnerInput(
+            projectPath: dir.path,
+            schematizedFiles: [SchematizedFile(originalPath: sourceFile.path, schematizedContent: "let x = false")],
+            mutants: [mutant]
+        )
+
+        _ = try await executor.execute(input)
+
+        let cacheFile = URL(fileURLWithPath: dir.path)
+            .appendingPathComponent(CacheStore.directoryName)
+            .appendingPathComponent("results.json")
+        #expect(!FileManager.default.fileExists(atPath: cacheFile.path))
+    }
+
     @Test("Given quiet is false, when execute called, then reporter produces output")
     func nonQuietConfigurationProducesOutput() async throws {
         let dir = try FileHelpers.makeTemporaryDirectory()
