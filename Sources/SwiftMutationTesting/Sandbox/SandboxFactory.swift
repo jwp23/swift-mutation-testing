@@ -86,19 +86,24 @@ struct SandboxFactory: Sendable {
     func replicate(_ sandbox: Sandbox) throws -> Sandbox {
         let sandboxURL = try makeSandboxRoot()
 
-        let items = try FileManager.default.contentsOfDirectory(
-            at: sandbox.rootURL,
-            includingPropertiesForKeys: nil
-        )
-
-        for item in items where item.lastPathComponent != Self.ownerPidFileName {
-            try FileManager.default.copyItem(
-                at: item,
-                to: sandboxURL.appendingPathComponent(item.lastPathComponent)
+        do {
+            let items = try FileManager.default.contentsOfDirectory(
+                at: sandbox.rootURL,
+                includingPropertiesForKeys: nil
             )
-        }
 
-        return Sandbox(rootURL: sandboxURL)
+            for item in items where item.lastPathComponent != Self.ownerPidFileName {
+                try FileManager.default.copyItem(
+                    at: item,
+                    to: sandboxURL.appendingPathComponent(item.lastPathComponent)
+                )
+            }
+
+            return Sandbox(rootURL: sandboxURL)
+        } catch {
+            try? FileManager.default.removeItem(at: sandboxURL)
+            throw error
+        }
     }
 
     /// Creates a sandbox root and records its owner pid under the sandbox lock, so a concurrent

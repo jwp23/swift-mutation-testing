@@ -27,6 +27,13 @@ struct MutantExecutor: Sendable {
         let start: Date
     }
 
+    private struct ExecutionSetup {
+        let artifact: BuildArtifact?
+        let schemaBuildExcluded: [MutantDescriptor]
+        let sandboxes: [Sandbox]
+        let pool: SimulatorPool
+    }
+
     func execute(_ input: RunnerInput) async throws -> [ExecutionResult] {
         let reporter: any ProgressReporter =
             configuration.reporting.quiet
@@ -46,18 +53,8 @@ struct MutantExecutor: Sendable {
             input: input, hasher: hasher, cacheStore: cacheStore, reporter: reporter
         )
 
-        let sandbox = try await SandboxFactory().create(
-            projectPath: input.projectPath,
-            schematizedFiles: input.schematizedFiles,
-            supportFileContent: input.supportFileContent
-        )
-        SandboxCleaner.register(sandbox)
-
-        let (artifact, schemaBuildExcluded) = try await buildArtifact(sandbox: sandbox, input: input, deps: deps)
-        let sandboxes = try workerSandboxes(buildSandbox: sandbox, artifact: artifact)
-        let pool = try await makePool(launcher: launcher)
-        try await pool.setUp()
-        await reporter.report(.simulatorPoolReady(size: pool.size))
+        let setup = try await prepareExecution(input: input, deps: deps)
+        await reporter.report(.simulatorPoolReady(size: setup.pool.size))
 
         let results: [ExecutionResult]
         do {
@@ -65,24 +62,53 @@ struct MutantExecutor: Sendable {
                 MutantRunContext(
                     deps: deps,
                     input: input,
-                    sandboxes: sandboxes,
-                    pool: pool,
-                    artifact: artifact,
-                    schemaBuildExcluded: schemaBuildExcluded
+                    sandboxes: setup.sandboxes,
+                    pool: setup.pool,
+                    artifact: setup.artifact,
+                    schemaBuildExcluded: setup.schemaBuildExcluded
                 )
             )
         } catch {
-            await pool.tearDown()
-            cleanUp(sandboxes)
+            await setup.pool.tearDown()
+            cleanUp(setup.sandboxes)
             throw error
         }
 
-        await pool.tearDown()
-        cleanUp(sandboxes)
+        await setup.pool.tearDown()
+        cleanUp(setup.sandboxes)
         try await cacheStore.persist()
         try await cacheStore.persistMetadata(metadata)
 
         return results
+    }
+
+    /// Builds the artifact, replicates worker sandboxes and stands up the simulator pool. Any
+    /// failure along the way leaves nothing behind: every sandbox registered so far — the build
+    /// sandbox and any worker replicas already created — is removed before the error propagates.
+    private func prepareExecution(input: RunnerInput, deps: ExecutionDeps) async throws -> ExecutionSetup {
+        let sandbox = try await SandboxFactory().create(
+            projectPath: input.projectPath,
+            schematizedFiles: input.schematizedFiles,
+            supportFileContent: input.supportFileContent
+        )
+        SandboxCleaner.register(sandbox)
+
+        do {
+            let (artifact, schemaBuildExcluded) = try await buildArtifact(sandbox: sandbox, input: input, deps: deps)
+            let sandboxes = try workerSandboxes(buildSandbox: sandbox, artifact: artifact)
+            let pool = try await makePool(launcher: launcher)
+            try await pool.setUp()
+
+            return ExecutionSetup(
+                artifact: artifact,
+                schemaBuildExcluded: schemaBuildExcluded,
+                sandboxes: sandboxes,
+                pool: pool
+            )
+        } catch {
+            SandboxCleaner.cleanupActiveSandboxes()
+            throw error
+        }
     }
 
     /// The sandboxes this run's workers execute in: the sandbox that was built, plus a copy of it
