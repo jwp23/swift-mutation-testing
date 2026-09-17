@@ -218,6 +218,12 @@ struct ProcessRunner: Sendable {
         do {
             try process.run()
             setpgid(process.processIdentifier, process.processIdentifier)
+            // onCancel can run concurrently with this method, even before process.run() has
+            // assigned a real pid — its own killProcessTree call is then a no-op against pid 0.
+            // Re-checking here, now that the pid is real, closes that window.
+            if killedByUs.value {
+                killProcessTree(process.processIdentifier)
+            }
         } catch {
             timeoutTask.cancel()
             continuation.resume(throwing: error)
@@ -250,6 +256,12 @@ struct ProcessRunner: Sendable {
         do {
             try process.run()
             setpgid(process.processIdentifier, process.processIdentifier)
+            // onCancel can run concurrently with this method, even before process.run() has
+            // assigned a real pid — its own killProcessTree call is then a no-op against pid 0.
+            // Re-checking here, now that the pid is real, closes that window.
+            if killedByUs.value {
+                killProcessTree(process.processIdentifier)
+            }
         } catch {
             timeoutTask.cancel()
             capture.fileHandle.closeFile()
@@ -313,6 +325,12 @@ struct ProcessRunner: Sendable {
         do {
             try process.run()
             setpgid(process.processIdentifier, process.processIdentifier)
+            // onCancel can run concurrently with this method, even before process.run() has
+            // assigned a real pid — its own killProcessTree call is then a no-op against pid 0.
+            // Re-checking here, now that the pid is real, closes that window.
+            if launch.killedByUs.value {
+                killProcessTree(process.processIdentifier)
+            }
         } catch {
             timeoutTask.cancel()
             reader.readabilityHandler = nil
