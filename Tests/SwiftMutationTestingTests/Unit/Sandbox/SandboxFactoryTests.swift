@@ -112,6 +112,72 @@ struct SandboxFactoryTests {
         #expect(!FileManager.default.fileExists(atPath: supportInBeta.path))
     }
 
+    @Test(
+        "Given SPM multiple targets, when sandbox created, then support file lands in each schematized target"
+    )
+    func injectsSupportFileIntoEveryTargetWithSchematizedFiles() async throws {
+        let projectDir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(projectDir) }
+
+        let alphaDir = projectDir.appendingPathComponent("Sources/Alpha")
+        let betaDir = projectDir.appendingPathComponent("Sources/Beta")
+        let gammaDir = projectDir.appendingPathComponent("Sources/Gamma")
+        try FileManager.default.createDirectory(at: alphaDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: betaDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: gammaDir, withIntermediateDirectories: true)
+        try FileHelpers.write("let a = 1", named: "Alpha.swift", in: alphaDir)
+        try FileHelpers.write("let b = 1", named: "Beta.swift", in: betaDir)
+        try FileHelpers.write("let g = 1", named: "Gamma.swift", in: gammaDir)
+
+        let alphaFilePath = alphaDir.appendingPathComponent("Alpha.swift").path
+        let betaFilePath = betaDir.appendingPathComponent("Beta.swift").path
+
+        let schematizedAlpha = SchematizedFile(originalPath: alphaFilePath, schematizedContent: "let a = 2")
+        let schematizedBeta = SchematizedFile(originalPath: betaFilePath, schematizedContent: "let b = 2")
+        let sandbox = try await factory.create(
+            projectPath: projectDir.path,
+            schematizedFiles: [schematizedAlpha, schematizedBeta],
+            supportFileContent: "let support = true"
+        )
+        defer { try? sandbox.cleanup() }
+
+        let supportInAlpha = sandbox.rootURL.appendingPathComponent("Sources/Alpha/__SMTSupport.swift")
+        let supportInBeta = sandbox.rootURL.appendingPathComponent("Sources/Beta/__SMTSupport.swift")
+        let supportInGamma = sandbox.rootURL.appendingPathComponent("Sources/Gamma/__SMTSupport.swift")
+
+        #expect(FileManager.default.fileExists(atPath: supportInAlpha.path))
+        #expect(FileManager.default.fileExists(atPath: supportInBeta.path))
+        #expect(!FileManager.default.fileExists(atPath: supportInGamma.path))
+    }
+
+    @Test(
+        "Given no schematized files, when sandbox created, then support file falls back to first alphabetical dir"
+    )
+    func injectsSupportFileIntoFirstAlphabeticalDirWhenNoSchematizedFilesResolve() async throws {
+        let projectDir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(projectDir) }
+
+        let alphaDir = projectDir.appendingPathComponent("Sources/Alpha")
+        let betaDir = projectDir.appendingPathComponent("Sources/Beta")
+        try FileManager.default.createDirectory(at: alphaDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: betaDir, withIntermediateDirectories: true)
+        try FileHelpers.write("let a = 1", named: "Alpha.swift", in: alphaDir)
+        try FileHelpers.write("let b = 1", named: "Beta.swift", in: betaDir)
+
+        let sandbox = try await factory.create(
+            projectPath: projectDir.path,
+            schematizedFiles: [],
+            supportFileContent: "let support = true"
+        )
+        defer { try? sandbox.cleanup() }
+
+        let supportInAlpha = sandbox.rootURL.appendingPathComponent("Sources/Alpha/__SMTSupport.swift")
+        let supportInBeta = sandbox.rootURL.appendingPathComponent("Sources/Beta/__SMTSupport.swift")
+
+        #expect(FileManager.default.fileExists(atPath: supportInAlpha.path))
+        #expect(!FileManager.default.fileExists(atPath: supportInBeta.path))
+    }
+
     @Test("Given Xcode project, when sandbox created, then support content is appended to first schematized file")
     func injectsSupportContentIntoFirstSchematizedFileForXcodeProject() async throws {
         let projectDir = try FileHelpers.makeTemporaryDirectory()
