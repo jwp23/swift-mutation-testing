@@ -113,7 +113,8 @@ struct IncompatibleMutantExecutorTests {
                 cacheStore: cacheStore,
                 reporter: MockProgressReporter(),
                 counter: MutationCounter(total: 1),
-                killerTestFileResolver: KillerTestFileResolver(testFilePaths: [])
+                killerTestFileResolver: KillerTestFileResolver(testFilePaths: []),
+                likelyKillerTestSelector: LikelyKillerTestSelector(testFilePaths: [], overrides: [:])
             ),
             sandboxFactory: SandboxFactory()
         )
@@ -130,7 +131,8 @@ struct IncompatibleMutantExecutorTests {
                 cacheStore: cacheStore,
                 reporter: MockProgressReporter(),
                 counter: MutationCounter(total: 1),
-                killerTestFileResolver: KillerTestFileResolver(testFilePaths: [])
+                killerTestFileResolver: KillerTestFileResolver(testFilePaths: []),
+                likelyKillerTestSelector: LikelyKillerTestSelector(testFilePaths: [], overrides: [:])
             ),
             sandboxFactory: SandboxFactory()
         )
@@ -200,7 +202,8 @@ struct IncompatibleMutantExecutorTests {
                 cacheStore: cacheStore,
                 reporter: MockProgressReporter(),
                 counter: MutationCounter(total: 1),
-                killerTestFileResolver: KillerTestFileResolver(testFilePaths: [])
+                killerTestFileResolver: KillerTestFileResolver(testFilePaths: []),
+                likelyKillerTestSelector: LikelyKillerTestSelector(testFilePaths: [], overrides: [:])
             ),
             sandboxFactory: SandboxFactory()
         )
@@ -216,7 +219,8 @@ struct IncompatibleMutantExecutorTests {
                 cacheStore: cacheStore,
                 reporter: MockProgressReporter(),
                 counter: MutationCounter(total: 1),
-                killerTestFileResolver: KillerTestFileResolver(testFilePaths: [])
+                killerTestFileResolver: KillerTestFileResolver(testFilePaths: []),
+                likelyKillerTestSelector: LikelyKillerTestSelector(testFilePaths: [], overrides: [:])
             ),
             sandboxFactory: SandboxFactory()
         )

@@ -1,6 +1,16 @@
 import Foundation
 
 struct ConfigurationFileParser: Sendable {
+    /// Key prefix each entry of the `likely-killer-tests` mapping is flattened under, so that a
+    /// nested block still fits the flat key-value shape the resolver reads.
+    static let likelyKillerTestsPrefix = "likely-killer-tests."
+
+    /// A nested block whose lines mean something other than a list item under the last key.
+    private enum Block {
+        case mutators
+        case likelyKillerTests
+    }
+
     func parse(at projectPath: String) throws -> [String: String] {
         let fileURL = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(".swift-mutation-testing.yml")
@@ -13,7 +23,7 @@ struct ConfigurationFileParser: Sendable {
         var result: [String: String] = [:]
         var lastKey: String?
         var listValues: [String: [String]] = [:]
-        var inMutatorsBlock = false
+        var block: Block?
         var currentMutatorName: String?
         var disabledMutators: [String] = []
 
@@ -24,20 +34,24 @@ struct ConfigurationFileParser: Sendable {
             let indent = line.prefix(while: { $0 == " " }).count
 
             if indent == 0 {
-                inMutatorsBlock = false
+                block = nil
                 currentMutatorName = nil
-                parseTopLevel(trimmed, result: &result, lastKey: &lastKey, inMutatorsBlock: &inMutatorsBlock)
+                parseTopLevel(trimmed, result: &result, lastKey: &lastKey, block: &block)
                 continue
             }
 
-            if inMutatorsBlock {
+            switch block {
+            case .mutators:
                 parseMutatorLine(trimmed, currentName: &currentMutatorName, disabled: &disabledMutators)
-                continue
-            }
 
-            if trimmed.hasPrefix("- "), let key = lastKey {
-                let item = String(trimmed.dropFirst(2)).trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-                listValues[key, default: []].append(item)
+            case .likelyKillerTests:
+                parseLikelyKillerTestsLine(trimmed, result: &result)
+
+            case nil:
+                if trimmed.hasPrefix("- "), let key = lastKey {
+                    let item = String(trimmed.dropFirst(2)).trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                    listValues[key, default: []].append(item)
+                }
             }
         }
 
@@ -56,7 +70,7 @@ struct ConfigurationFileParser: Sendable {
         _ trimmed: String,
         result: inout [String: String],
         lastKey: inout String?,
-        inMutatorsBlock: inout Bool
+        block: inout Block?
     ) {
         guard let colonIndex = trimmed.firstIndex(of: ":") else { return }
         let key = String(trimmed[..<colonIndex]).trimmingCharacters(in: .whitespaces)
@@ -65,10 +79,28 @@ struct ConfigurationFileParser: Sendable {
         guard !key.isEmpty else { return }
         lastKey = key
         if key == "mutators" {
-            inMutatorsBlock = true
+            block = .mutators
+        } else if key == "likely-killer-tests" {
+            block = .likelyKillerTests
         } else if !value.isEmpty {
             result[key] = value
         }
+    }
+
+    /// One `Source.swift: ATests.swift, BTests.swift` entry of the `likely-killer-tests` mapping,
+    /// flattened onto a key of its own so the mapping survives as flat key-value pairs.
+    private func parseLikelyKillerTestsLine(_ trimmed: String, result: inout [String: String]) {
+        guard let colonIndex = trimmed.firstIndex(of: ":") else { return }
+        let source = String(trimmed[..<colonIndex])
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        let tests = String(trimmed[trimmed.index(after: colonIndex)...])
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+
+        guard !source.isEmpty, !tests.isEmpty else { return }
+
+        result[Self.likelyKillerTestsPrefix + source] = tests
     }
 
     private func parseMutatorLine(

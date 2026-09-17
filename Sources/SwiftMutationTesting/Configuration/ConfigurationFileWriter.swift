@@ -110,10 +110,24 @@ struct ConfigurationFileWriter: Sendable {
         lines.append("")
         lines.append("# Per-mutant test timeout in seconds (default: 30 for SPM)")
         lines.append("timeout: 30")
+        lines.append(contentsOf: likelyKillerTestsSection())
         lines.append(contentsOf: reportSection(testTarget: testTarget, excludeExample: "**/Tests/**"))
         lines.append(contentsOf: mutatorsSection())
 
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// Mutants run the tests named for their source file first, so a kill needs no full suite run.
+    /// Sources that break the naming convention need the mapping spelled out here.
+    private func likelyKillerTestsSection() -> [String] {
+        [
+            "",
+            "# Tests most likely to kill a mutant, for sources the Foo.swift -> FooTests.swift",
+            "# convention does not cover. They run first; a mutant they do not kill still faces",
+            "# the whole suite before it counts as survived.",
+            "# likely-killer-tests:",
+            "#   Core/Minutes.swift: PhaseDisplayTests.swift, CountdownTests.swift",
+        ]
     }
 
     private func reportSection(testTarget: String?, excludeExample: String) -> [String] {

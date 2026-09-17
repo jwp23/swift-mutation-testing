@@ -17,6 +17,10 @@ struct RunnerConfiguration: Sendable {
         var concurrency: Int
         var noCache: Bool
         var testingFramework: TestingFramework = .swiftTesting
+
+        /// Test files most likely to kill a mutant in a source file, for sources the
+        /// `Foo.swift` → `FooTests.swift` convention does not cover.
+        var likelyKillerTests: [String: [String]] = [:]
     }
 
     struct ReportingOptions: Sendable {

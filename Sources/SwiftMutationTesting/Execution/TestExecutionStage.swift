@@ -159,41 +159,84 @@ struct TestExecutionStage: Sendable {
         return deps.killerTestFileResolver.resolve(testName: testName)
     }
 
-    /// Runs the mutant's test bundles in the worker's sandbox, selecting the mutant through the
-    /// environment. Bundles run in turn until one reports a failure — a mutant a bundle already
-    /// killed cannot be killed harder by the next one — and each run only gets what is left of
-    /// the mutant's timeout.
+    /// Runs the mutant's tests in the worker's sandbox, selecting the mutant through the
+    /// environment. The tests named for the mutated source run first: one of them failing settles
+    /// the mutant without the whole suite ever starting, while all of them passing proves nothing
+    /// — only the whole suite can call a mutant survived, so it runs next. Both runs come out of
+    /// the one per-mutant timeout.
     private func launchSPM(
         mutant: MutantDescriptor,
         worker: Int,
         in context: TestExecutionContext
     ) async throws -> TestLaunchResult {
         let selection = bundleSelection(in: context)
-        let bundlePaths = selection.paths
 
-        guard !bundlePaths.isEmpty else { throw BuildError.testBundleNotFound }
+        guard !selection.paths.isEmpty else { throw BuildError.testBundleNotFound }
 
         let sandbox = context.sandbox(forWorker: worker)
-        let timeout = context.configuration.build.timeout
         let start = Date()
+        let deadline = start.addingTimeInterval(context.configuration.build.timeout)
+
+        if let likelyKillers = likelyKillerSelection(for: mutant, given: selection) {
+            let run = try await runBundles(
+                selection.paths, selecting: likelyKillers,
+                mutant: mutant, sandbox: sandbox, deadline: deadline
+            )
+
+            if run.exitCode != 0 {
+                return TestLaunchResult(
+                    exitCode: run.exitCode, output: run.output,
+                    xcresultPath: "", duration: Date().timeIntervalSince(start)
+                )
+            }
+        }
+
+        let run = try await runBundles(
+            selection.paths, selecting: selection.xctestSelection,
+            mutant: mutant, sandbox: sandbox, deadline: deadline
+        )
+
+        return TestLaunchResult(
+            exitCode: run.exitCode, output: run.output,
+            xcresultPath: "", duration: Date().timeIntervalSince(start)
+        )
+    }
+
+    /// The tests worth trying before the whole suite. A configured test target that already names
+    /// an XCTest selection has narrowed the run itself, and that selection stands.
+    ///
+    /// Whatever this selects runs over the same bundles the whole suite does, so it can only
+    /// confirm a kill the whole suite would also have found: a selection aimed at the wrong tests,
+    /// or at none, costs a run and nothing else.
+    private func likelyKillerSelection(for mutant: MutantDescriptor, given selection: BundleSelection) -> String? {
+        guard selection.xctestSelection == nil else { return nil }
+
+        return deps.likelyKillerTestSelector.selection(forSourceFile: mutant.filePath)
+    }
+
+    /// Runs the bundles in turn until one reports a failure — a mutant a bundle already killed
+    /// cannot be killed harder by the next one — giving each run only what is left before the
+    /// mutant's deadline.
+    private func runBundles(
+        _ bundlePaths: [String],
+        selecting xctestSelection: String?,
+        mutant: MutantDescriptor,
+        sandbox: Sandbox,
+        deadline: Date
+    ) async throws -> (exitCode: Int32, output: String) {
         var output = ""
         var exitCode: Int32 = 0
 
         for bundlePath in bundlePaths {
-            let remaining = timeout - Date().timeIntervalSince(start)
+            let remaining = deadline.timeIntervalSinceNow
 
             guard remaining > 0 else {
-                return TestLaunchResult(
-                    exitCode: SPMResultParser.timeoutExitCode,
-                    output: output,
-                    xcresultPath: "",
-                    duration: Date().timeIntervalSince(start)
-                )
+                return (SPMResultParser.timeoutExitCode, output)
             }
 
             var arguments = ["xctest"]
 
-            if let xctestSelection = selection.xctestSelection {
+            if let xctestSelection {
                 arguments += ["-XCTest", xctestSelection]
             }
 
@@ -218,12 +261,7 @@ struct TestExecutionStage: Sendable {
             if exitCode != 0 { break }
         }
 
-        return TestLaunchResult(
-            exitCode: exitCode,
-            output: output,
-            xcresultPath: "",
-            duration: Date().timeIntervalSince(start)
-        )
+        return (exitCode, output)
     }
 
     private func bundleSelection(in context: TestExecutionContext) -> BundleSelection {

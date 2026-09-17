@@ -164,10 +164,16 @@ struct MutantExecutor: Sendable {
     ) -> ExecutionDeps {
         let mutantCount = input.mutants.count
         let counter = MutationCounter(total: mutantCount)
-        let resolver = KillerTestFileResolver(testFilePaths: hasher.testFilePaths(projectPath: input.projectPath))
+        let testFilePaths = hasher.testFilePaths(projectPath: input.projectPath)
+        let resolver = KillerTestFileResolver(testFilePaths: testFilePaths)
+        let likelyKillers = LikelyKillerTestSelector(
+            testFilePaths: testFilePaths,
+            overrides: configuration.build.likelyKillerTests
+        )
         return ExecutionDeps(
             launcher: launcher, cacheStore: cacheStore, reporter: reporter,
-            counter: counter, killerTestFileResolver: resolver
+            counter: counter, killerTestFileResolver: resolver,
+            likelyKillerTestSelector: likelyKillers
         )
     }
 

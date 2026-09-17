@@ -123,7 +123,17 @@ flowchart TD
 
 **Per-mutant execution (SPM):** steps 2–5 are replaced by running each built `.xctest` bundle with `xcrun xctest` from the worker's own sandbox, with `__SWIFT_MUTATION_TESTING_ACTIVE` set to the mutant ID and only what is left of the mutant's timeout. Bundles run in turn until one fails, and the result is parsed by `SPMResultParser`. A configured
 test target selects the bundle by name and any remaining `Class/method` component is passed on as
-an `-XCTest` selection — see [USAGE](../USAGE.MD#limiting-tests-to-a-target). No simulator slot is acquired — SPM tests run on the host, and one sandbox per worker is what keeps concurrent mutants out of each other's build directory.
+an `-XCTest` selection — see [USAGE](../USAGE.MD#limiting-tests-to-a-target).
+
+**Likely-killer tests first:** unless the configured test target already names an XCTest selection,
+the tests named for the mutated source (`Foo.swift` → `FooTests`, where that file declares an
+`XCTestCase` subclass, or the configured `likely-killer-tests` mapping) run first as their own
+`-XCTest` selection. A mutant whose selection runs first and then falls through launches the
+bundles twice in the same worker sandbox, which a target suite that writes into its working
+directory may notice. A failure there settles
+the mutant, and the whole suite never starts. Passing them proves nothing — only the whole suite can
+call a mutant survived — so the full run follows, out of the same per-mutant timeout, and whichever
+run fails is the one whose failing test is reported as the killer. No simulator slot is acquired — SPM tests run on the host, and one sandbox per worker is what keeps concurrent mutants out of each other's build directory.
 
 **Dynamic concurrency:** the task group seeds N tasks initially, then adds one new task for each completed task, maintaining exactly N active tasks at all times.
 

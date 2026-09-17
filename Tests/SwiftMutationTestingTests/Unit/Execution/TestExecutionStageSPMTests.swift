@@ -204,6 +204,146 @@ struct TestExecutionStageSPMTests {
         #expect(await launcher.peakInFlight == 1)
     }
 
+    @Test("Given a test file named for the mutant's source, when it runs, then those tests run before the suite")
+    func likelyKillerTestsRunBeforeTheFullSuite() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let launcher = RecordingProcessLauncher()
+        let context = makeSPMContext(
+            sandboxes: [Sandbox(rootURL: dir)],
+            bundlePaths: [".build/debug/MyLibTests.xctest"]
+        )
+
+        let results = try await makeStage(
+            launcher: launcher, in: dir, testFilePaths: [try writeXCTestFile(named: "FooTests.swift", in: dir)]
+        )
+        .execute(mutants: [makeSPMMutant(id: "m0", filePath: "/p/Sources/Foo.swift")], in: context)
+
+        let requests = await launcher.requests
+        let bundlePath = dir.appendingPathComponent(".build/debug/MyLibTests.xctest").path
+
+        #expect(requests.count == 2)
+        #expect(requests.first?.arguments == ["xctest", "-XCTest", "FooTests", bundlePath])
+        #expect(requests.last?.arguments == ["xctest", bundlePath])
+        #expect(results.first?.status == .survived)
+    }
+
+    @Test("Given the likely killers kill the mutant, when it runs, then the full suite never runs")
+    func likelyKillerKillStopsBeforeTheFullSuite() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let launcher = RecordingProcessLauncher(
+            outcomes: [(exitCode: 1, output: "Test Case '-[FooTests testAddsUp]' failed (0.001 seconds).")]
+        )
+        let context = makeSPMContext(
+            sandboxes: [Sandbox(rootURL: dir)],
+            bundlePaths: [".build/debug/MyLibTests.xctest"]
+        )
+
+        let results = try await makeStage(
+            launcher: launcher, in: dir, testFilePaths: [try writeXCTestFile(named: "FooTests.swift", in: dir)]
+        )
+        .execute(mutants: [makeSPMMutant(id: "m0", filePath: "/p/Sources/Foo.swift")], in: context)
+
+        #expect(await launcher.requests.count == 1)
+        #expect(results.first?.status == .killed(by: "FooTests.testAddsUp"))
+    }
+
+    @Test("Given the likely killers pass, when the full suite kills the mutant, then the suite's test is named")
+    func fullSuiteKillNamesItsOwnFailingTest() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let launcher = RecordingProcessLauncher(
+            outcomes: [
+                (exitCode: 0, output: "Test Case '-[FooTests testAddsUp]' passed (0.001 seconds)."),
+                (exitCode: 1, output: "Test Case '-[WiringTests testEndToEnd]' failed (0.001 seconds)."),
+            ]
+        )
+        let context = makeSPMContext(
+            sandboxes: [Sandbox(rootURL: dir)],
+            bundlePaths: [".build/debug/MyLibTests.xctest"]
+        )
+
+        let results = try await makeStage(
+            launcher: launcher, in: dir, testFilePaths: [try writeXCTestFile(named: "FooTests.swift", in: dir)]
+        )
+        .execute(mutants: [makeSPMMutant(id: "m0", filePath: "/p/Sources/Foo.swift")], in: context)
+
+        #expect(await launcher.requests.count == 2)
+        #expect(results.first?.status == .killed(by: "WiringTests.testEndToEnd"))
+    }
+
+    @Test("Given no test file named for the mutant's source, when it runs, then only the full suite runs")
+    func sourceWithoutLikelyKillersRunsOnlyTheFullSuite() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let launcher = RecordingProcessLauncher()
+        let context = makeSPMContext(
+            sandboxes: [Sandbox(rootURL: dir)],
+            bundlePaths: [".build/debug/MyLibTests.xctest"]
+        )
+
+        _ = try await makeStage(
+            launcher: launcher, in: dir, testFilePaths: [try writeXCTestFile(named: "BarTests.swift", in: dir)]
+        )
+        .execute(mutants: [makeSPMMutant(id: "m0", filePath: "/p/Sources/Foo.swift")], in: context)
+
+        let requests = await launcher.requests
+
+        #expect(requests.count == 1)
+        #expect(requests.first?.arguments.contains("-XCTest") == false)
+    }
+
+    @Test("Given the source's test file uses Swift Testing, when its mutant runs, then only the full suite runs")
+    func swiftTestingTestFileSkipsTheLikelyKillerRun() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let launcher = RecordingProcessLauncher()
+        let context = makeSPMContext(
+            sandboxes: [Sandbox(rootURL: dir)],
+            bundlePaths: [".build/debug/MyLibTests.xctest"]
+        )
+
+        _ = try await makeStage(
+            launcher: launcher, in: dir,
+            testFilePaths: [try writeSwiftTestingFile(named: "FooTests.swift", in: dir)]
+        )
+        .execute(mutants: [makeSPMMutant(id: "m0", filePath: "/p/Sources/Foo.swift")], in: context)
+
+        let requests = await launcher.requests
+
+        #expect(requests.count == 1)
+        #expect(requests.first?.arguments.contains("-XCTest") == false)
+    }
+
+    @Test("Given a test target naming a class, when a mutant runs, then that selection runs instead of likely killers")
+    func configuredSelectionTakesPrecedenceOverLikelyKillers() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let launcher = RecordingProcessLauncher()
+        let context = makeSPMContext(
+            sandboxes: [Sandbox(rootURL: dir)],
+            bundlePaths: [".build/debug/MyLibTests.xctest"],
+            testTarget: "MyLibTests/SomeSuite"
+        )
+
+        _ = try await makeStage(
+            launcher: launcher, in: dir, testFilePaths: [try writeXCTestFile(named: "FooTests.swift", in: dir)]
+        )
+        .execute(mutants: [makeSPMMutant(id: "m0", filePath: "/p/Sources/Foo.swift")], in: context)
+
+        let requests = await launcher.requests
+
+        #expect(requests.count == 1)
+        #expect(requests.first?.arguments.dropLast() == ["xctest", "-XCTest", "SomeSuite"])
+    }
+
     @Test("Given an SPM artifact without test bundles, when mutant executed, then the error is propagated")
     func missingTestBundleFailsTheRun() async throws {
         let dir = try FileHelpers.makeTemporaryDirectory()
@@ -222,14 +362,16 @@ private func makeStage(
     launcher: any ProcessLaunching,
     in dir: URL,
     total: Int = 1,
-    reporter: MockProgressReporter = MockProgressReporter()
+    reporter: MockProgressReporter = MockProgressReporter(),
+    testFilePaths: [String] = []
 ) -> TestExecutionStage {
     TestExecutionStage(
         deps: makeExecutionDeps(
             launcher: launcher,
             cacheStorePath: dir.appendingPathComponent("cache.json").path,
             reporter: reporter,
-            total: total
+            total: total,
+            testFilePaths: testFilePaths
         )
     )
 }
@@ -258,9 +400,30 @@ private func makeSPMContext(
     )
 }
 
-private func makeSPMMutant(id: String) -> MutantDescriptor {
+private func writeXCTestFile(named fileName: String, in directory: URL) throws -> String {
+    let className = (fileName as NSString).deletingPathExtension
+    try FileHelpers.write(
+        "import XCTest\n\nfinal class \(className): XCTestCase {}\n",
+        named: fileName,
+        in: directory
+    )
+    return directory.appendingPathComponent(fileName).path
+}
+
+private func writeSwiftTestingFile(named fileName: String, in directory: URL) throws -> String {
+    let suiteName = (fileName as NSString).deletingPathExtension
+    try FileHelpers.write(
+        "import Testing\n\nstruct \(suiteName) {\n    @Test func something() {}\n}\n",
+        named: fileName,
+        in: directory
+    )
+    return directory.appendingPathComponent(fileName).path
+}
+
+private func makeSPMMutant(id: String, filePath: String = "/tmp/Foo.swift") -> MutantDescriptor {
     makeMutantDescriptor(
         id: id,
+        filePath: filePath,
         originalText: "a + b",
         mutatedText: "a - b",
         operatorIdentifier: "binaryOperator",
