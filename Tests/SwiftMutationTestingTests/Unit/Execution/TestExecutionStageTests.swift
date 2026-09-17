@@ -60,7 +60,8 @@ struct TestExecutionStageTests {
                 cacheStore: cacheStore,
                 reporter: MockProgressReporter(),
                 counter: MutationCounter(total: 1),
-                killerTestFileResolver: KillerTestFileResolver(testFilePaths: [])
+                killerTestFileResolver: KillerTestFileResolver(testFilePaths: []),
+                likelyKillerTestSelector: LikelyKillerTestSelector(testFilePaths: [], overrides: [:])
             )
         )
         _ = try await successStage.execute(mutants: [mutant], in: context)
@@ -71,7 +72,8 @@ struct TestExecutionStageTests {
                 cacheStore: cacheStore,
                 reporter: MockProgressReporter(),
                 counter: MutationCounter(total: 1),
-                killerTestFileResolver: KillerTestFileResolver(testFilePaths: [])
+                killerTestFileResolver: KillerTestFileResolver(testFilePaths: []),
+                likelyKillerTestSelector: LikelyKillerTestSelector(testFilePaths: [], overrides: [:])
             )
         )
         let results = try await failStage.execute(mutants: [mutant], in: context)
@@ -144,7 +146,8 @@ struct TestExecutionStageTests {
                 cacheStore: cacheStore,
                 reporter: MockProgressReporter(),
                 counter: MutationCounter(total: 1),
-                killerTestFileResolver: KillerTestFileResolver(testFilePaths: [])
+                killerTestFileResolver: KillerTestFileResolver(testFilePaths: []),
+                likelyKillerTestSelector: LikelyKillerTestSelector(testFilePaths: [], overrides: [:])
             )
         )
         let results = try await killedStage.execute(mutants: [mutant], in: context)

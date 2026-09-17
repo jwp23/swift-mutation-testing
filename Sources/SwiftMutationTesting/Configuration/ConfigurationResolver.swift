@@ -36,7 +36,8 @@ struct ConfigurationResolver: Sendable {
                 timeout: timeout,
                 concurrency: effectiveConcurrency,
                 noCache: cliArguments.build.noCache || fileValues["no-cache"]?.lowercased() == "true",
-                testingFramework: testingFramework
+                testingFramework: testingFramework,
+                likelyKillerTests: resolveLikelyKillerTests(from: fileValues)
             ),
             reporting: .init(
                 output: cliArguments.reporting.output ?? fileValues["output"],
@@ -134,6 +135,27 @@ struct ConfigurationResolver: Sendable {
         }
 
         return resolveList(cli: [], keys: ["operators"], from: fileValues)
+    }
+
+    /// The configured mapping from a source file to the test files most likely to kill its
+    /// mutants, reassembled from the flat keys the file parser flattens each entry onto.
+    private func resolveLikelyKillerTests(from fileValues: [String: String]) -> [String: [String]] {
+        let prefix = ConfigurationFileParser.likelyKillerTestsPrefix
+        var mapping: [String: [String]] = [:]
+
+        for (key, value) in fileValues where key.hasPrefix(prefix) {
+            let tests =
+                value
+                .components(separatedBy: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+
+            guard !tests.isEmpty else { continue }
+
+            mapping[String(key.dropFirst(prefix.count))] = tests
+        }
+
+        return mapping
     }
 
     private func resolvedPath(_ path: String) -> String {

@@ -470,4 +470,31 @@ struct ConfigurationResolverTests {
 
         #expect(result.build.testTarget == "AppTests")
     }
+
+    @Test("Given likely-killer-tests entries in the file, when resolved, then each source maps to its test files")
+    func likelyKillerTestsFromFile() throws {
+        let result = try resolver.resolve(
+            cliArguments: ParsedArguments(build: .init(scheme: "App", destination: "d")),
+            fileValues: [
+                "likely-killer-tests.Minutes.swift": "PhaseDisplayTests.swift, CountdownTests.swift",
+                "likely-killer-tests.Wiring.swift": "",
+            ]
+        )
+
+        #expect(
+            result.build.likelyKillerTests == [
+                "Minutes.swift": ["PhaseDisplayTests.swift", "CountdownTests.swift"]
+            ]
+        )
+    }
+
+    @Test("Given no likely-killer-tests entries, when resolved, then the mapping is empty")
+    func likelyKillerTestsDefaultToEmpty() throws {
+        let result = try resolver.resolve(
+            cliArguments: ParsedArguments(build: .init(scheme: "App", destination: "d")),
+            fileValues: [:]
+        )
+
+        #expect(result.build.likelyKillerTests.isEmpty)
+    }
 }

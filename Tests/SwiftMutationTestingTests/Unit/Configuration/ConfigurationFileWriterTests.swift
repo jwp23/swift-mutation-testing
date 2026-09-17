@@ -260,6 +260,21 @@ struct ConfigurationFileWriterTests {
         #expect(!content.contains("# test-target:"))
     }
 
+    @Test("Given an SPM project, when write called, then the likely-killer-tests override map is shown as an example")
+    func likelyKillerTestsExampleIsCommented() throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        try writer.write(
+            to: dir.path,
+            project: DetectedProject(kind: .spm(testTargets: ["FooTests"]), testTarget: "FooTests")
+        )
+
+        let content = try String(contentsOf: dir.appendingPathComponent(".swift-mutation-testing.yml"), encoding: .utf8)
+        #expect(content.contains("# likely-killer-tests:"))
+        #expect(!content.contains("\nlikely-killer-tests:"))
+    }
+
     @Test("Given existing config file, when write called, then throws UsageError")
     func throwsWhenFileAlreadyExists() throws {
         let dir = try FileHelpers.makeTemporaryDirectory()

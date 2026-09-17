@@ -172,4 +172,24 @@ struct ConfigurationFileParserTests {
 
         #expect(result["sources-path"] == "/my/sources")
     }
+
+    @Test("Given a likely-killer-tests block, when parsed, then each source maps to its listed test files")
+    func parsesLikelyKillerTestsBlock() throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let yaml = """
+            likely-killer-tests:
+              Minutes.swift: PhaseDisplayTests.swift, CountdownTests.swift
+              Core/Wiring.swift: WiringTests.swift
+            timeout: 45
+            """
+        try FileHelpers.write(yaml, named: ".swift-mutation-testing.yml", in: dir)
+
+        let result = try parser.parse(at: dir.path)
+
+        #expect(result["likely-killer-tests.Minutes.swift"] == "PhaseDisplayTests.swift, CountdownTests.swift")
+        #expect(result["likely-killer-tests.Core/Wiring.swift"] == "WiringTests.swift")
+        #expect(result["timeout"] == "45")
+    }
 }

@@ -49,6 +49,7 @@ struct ExecutionDeps: Sendable {
     let reporter: any ProgressReporter
     let counter: MutationCounter
     let killerTestFileResolver: KillerTestFileResolver
+    let likelyKillerTestSelector: LikelyKillerTestSelector
 }
 ```
 
@@ -61,6 +62,31 @@ Bundle of shared collaborators passed between `MutantExecutor` and the stage typ
 | `reporter` | Progress events sink (console or silent) |
 | `counter` | Shared actor tracking the current mutant index |
 | `killerTestFileResolver` | Maps killer test names to source file paths for granular cache invalidation |
+| `likelyKillerTestSelector` | Maps a mutated source file to the tests most likely to kill its mutants |
+
+---
+
+## Execution/LikelyKillerTestSelector.swift
+
+```swift
+struct LikelyKillerTestSelector: Sendable {
+    init(testFilePaths: [String], overrides: [String: [String]])
+
+    let overrides: [String: [String]]
+
+    func selection(forSourceFile sourceFilePath: String) -> String?
+}
+```
+
+Names the tests an SPM mutant runs before the whole suite. `Foo.swift` is covered by
+`FooTests.swift` unless `likely-killer-tests` in the configuration file maps that source onto
+other test files; the result is the XCTest selection naming those test classes, or `nil` when the
+source has no such test file and only the whole suite can judge its mutants.
+
+| Parameter / Field | Description |
+|---|---|
+| `testFilePaths` | Every test file collected from the project. Read once at init: only those declaring an `XCTestCase` subclass can be selected, since an XCTest selection reaches nothing in a Swift Testing suite |
+| `overrides` | Configured test files per source path suffix; the longest matching key wins, and configured names are used as written |
 
 ---
 
