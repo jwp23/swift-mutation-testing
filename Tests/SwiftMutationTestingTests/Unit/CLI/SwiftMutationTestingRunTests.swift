@@ -91,4 +91,61 @@ struct SwiftMutationTestingRunTests {
 
         #expect(result == .error)
     }
+
+    @Test("Given a scope holding no mutant, when run called, then it passes without building")
+    func emptyScopePassesWithoutBuilding() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+        try FileHelpers.write("// swift-tools-version:6.0", named: "Package.swift", in: dir)
+        try FileHelpers.write("func f() { let x = true }", named: "Source.swift", in: dir)
+
+        let launcher = RecordingProcessLauncher()
+        var result: ExitCode?
+        let output = await captureOutput {
+            result = await SwiftMutationTesting.run(
+                args: [dir.path, "--scope-lines", "Absent.swift:1-2", "--quiet"],
+                launcher: launcher
+            )
+        }
+
+        #expect(result == .success)
+        #expect(output.contains("No mutants in scope"))
+        #expect(await launcher.requests.isEmpty)
+    }
+
+    @Test("Given a scope holding no mutant, when run called, then the scope it resolved is printed")
+    func emptyScopeIsPrintedSoATypoIsVisible() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+        try FileHelpers.write("// swift-tools-version:6.0", named: "Package.swift", in: dir)
+        try FileHelpers.write("func f() { let x = true }", named: "Source.swift", in: dir)
+
+        let output = await captureOutput {
+            _ = await SwiftMutationTesting.run(
+                args: [dir.path, "--scope-lines", "Absent.swift:1-2", "--quiet"],
+                launcher: RecordingProcessLauncher()
+            )
+        }
+
+        #expect(output.contains("Scope: Absent.swift:1-2"))
+    }
+
+    @Test("Given a scope holding no mutant and a report path, when run called, then the report is still written")
+    func emptyScopeStillWritesItsReport() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+        try FileHelpers.write("// swift-tools-version:6.0", named: "Package.swift", in: dir)
+        try FileHelpers.write("func f() { let x = true }", named: "Source.swift", in: dir)
+        let reportPath = dir.appendingPathComponent("report.json").path
+
+        let output = await captureOutput {
+            _ = await SwiftMutationTesting.run(
+                args: [dir.path, "--scope-lines", "Absent.swift:1-2", "--quiet", "--output", reportPath],
+                launcher: RecordingProcessLauncher()
+            )
+        }
+
+        #expect(output.contains("JSON report"))
+        #expect(FileManager.default.fileExists(atPath: reportPath))
+    }
 }

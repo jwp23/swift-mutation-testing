@@ -86,7 +86,8 @@ struct DiscoveryPipelineIntegrationTests {
             noCache: false,
             sourcesPath: dir.path,
             excludePatterns: [],
-            operators: ["ArithmeticOperatorReplacement"]
+            operators: ["ArithmeticOperatorReplacement"],
+            scope: nil
         )
         let result = try await pipeline.run(input: input)
 
@@ -152,7 +153,8 @@ extension DiscoveryPipelineIntegrationTests {
             noCache: false,
             sourcesPath: root.appending(path: "Sources").path,
             excludePatterns: excludePatterns,
-            operators: operators
+            operators: operators,
+            scope: nil
         )
     }
 }

@@ -8,7 +8,8 @@ func makeDiscoveryInput(
     noCache: Bool = false,
     sourcesPath: String,
     excludePatterns: [String] = [],
-    operators: [String] = []
+    operators: [String] = [],
+    scope: MutantScope? = nil
 ) -> DiscoveryInput {
     DiscoveryInput(
         projectPath: projectPath,
@@ -18,6 +19,7 @@ func makeDiscoveryInput(
         noCache: noCache,
         sourcesPath: sourcesPath,
         excludePatterns: excludePatterns,
-        operators: operators
+        operators: operators,
+        scope: scope
     )
 }

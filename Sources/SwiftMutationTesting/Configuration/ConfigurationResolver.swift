@@ -52,7 +52,10 @@ struct ConfigurationResolver: Sendable {
                     keys: ["exclude", "exclude-patterns"],
                     from: fileValues
                 ),
-                operators: resolveOperators(cli: cliArguments, fileValues: fileValues)
+                operators: resolveOperators(cli: cliArguments, fileValues: fileValues),
+                scopeLines: cliArguments.filter.scopeLines,
+                since: cliArguments.filter.since,
+                baselineReport: cliArguments.filter.baselineReport
             )
         )
     }

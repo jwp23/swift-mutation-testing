@@ -72,17 +72,32 @@ struct ParsedArguments: Sendable {
             sourcesPath: String? = nil,
             excludePatterns: [String] = [],
             operators: [String] = [],
-            disabledMutators: [String] = []
+            disabledMutators: [String] = [],
+            scopeLines: [String] = [],
+            since: String? = nil,
+            baselineReport: String? = nil
         ) {
             self.sourcesPath = sourcesPath
             self.excludePatterns = excludePatterns
             self.operators = operators
             self.disabledMutators = disabledMutators
+            self.scopeLines = scopeLines
+            self.since = since
+            self.baselineReport = baselineReport
         }
 
         var sourcesPath: String?
         var excludePatterns: [String]
         var operators: [String]
         var disabledMutators: [String]
+
+        /// `path:start-end` line sets the run is limited to.
+        var scopeLines: [String]
+
+        /// Git reference whose diff against the working tree limits the run.
+        var since: String?
+
+        /// Mutation report of an earlier full run, read to find the mutants a changed test killed.
+        var baselineReport: String?
     }
 }

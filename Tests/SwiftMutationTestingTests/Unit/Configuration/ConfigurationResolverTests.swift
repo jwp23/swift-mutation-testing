@@ -497,4 +497,23 @@ struct ConfigurationResolverTests {
 
         #expect(result.build.likelyKillerTests.isEmpty)
     }
+
+    @Test("Given CLI scoping flags, when resolved, then they carry into the filter options")
+    func scopingFlagsCarryIntoFilterOptions() throws {
+        let result = try resolver.resolve(
+            cliArguments: ParsedArguments(
+                build: .init(scheme: "App", destination: "d"),
+                filter: .init(
+                    scopeLines: ["Sources/Foo.swift:1-2"],
+                    since: "origin/main",
+                    baselineReport: "/tmp/report.json"
+                )
+            ),
+            fileValues: [:]
+        )
+
+        #expect(result.filter.scopeLines == ["Sources/Foo.swift:1-2"])
+        #expect(result.filter.since == "origin/main")
+        #expect(result.filter.baselineReport == "/tmp/report.json")
+    }
 }

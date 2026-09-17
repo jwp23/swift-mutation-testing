@@ -63,6 +63,22 @@ struct FileDiscoveryStageTests {
         #expect(result[0].path.hasSuffix("Source.swift"))
     }
 
+    @Test("Given file inside a directory named after the project's test target, when run, then excludes it")
+    func excludesProjectNamedTestDirectory() throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let testsDir = dir.appendingPathComponent("AppTests")
+        try FileManager.default.createDirectory(at: testsDir, withIntermediateDirectories: true)
+        try FileHelpers.write("class T {}", named: "Foo.swift", in: testsDir)
+        try FileHelpers.write("class S {}", named: "Source.swift", in: dir)
+
+        let result = try stage.run(input: makeDiscoveryInput(projectPath: dir.path, sourcesPath: dir.path))
+
+        #expect(result.count == 1)
+        #expect(result[0].path.hasSuffix("Source.swift"))
+    }
+
     @Test("Given file inside /.build/ directory, when run, then excludes it")
     func excludesBuildDirectory() throws {
         let dir = try FileHelpers.makeTemporaryDirectory()
@@ -278,5 +294,25 @@ struct FileDiscoveryStageTests {
         #expect(throws: FileDiscoveryError.sourcesPathNotFound("/nonexistent/path/that/does/not/exist")) {
             try stage.run(input: input)
         }
+    }
+
+    @Test("Given a scope naming one file, when run, then the files it does not name are not read")
+    func readsOnlyScopedFiles() throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        try FileHelpers.write("let x = 1", named: "InScope.swift", in: dir)
+        try FileHelpers.write("let y = 2", named: "OutOfScope.swift", in: dir)
+
+        let result = try stage.run(
+            input: makeDiscoveryInput(
+                projectPath: dir.path,
+                sourcesPath: dir.path,
+                scope: MutantScope(lineRangesByPath: ["InScope.swift": [1 ... 1]])
+            )
+        )
+
+        #expect(result.count == 1)
+        #expect(result[0].path.hasSuffix("InScope.swift"))
     }
 }

@@ -68,7 +68,8 @@ struct DiscoveryPipelineTests {
             noCache: true,
             sourcesPath: dir.path,
             excludePatterns: [],
-            operators: []
+            operators: [],
+            scope: nil
         )
         let result = try await pipeline.run(input: input)
 
@@ -103,6 +104,46 @@ struct DiscoveryPipelineTests {
         try FileHelpers.write("func f() { let x = true }", named: "Generated.swift", in: dir)
 
         let input = makeDiscoveryInput(sourcesPath: dir.path, excludePatterns: ["Generated.swift"])
+        let result = try await pipeline.run(input: input)
+
+        #expect(result.mutants.isEmpty)
+        #expect(result.schematizedFiles.isEmpty)
+    }
+
+    @Test("Given a scope over one line, when run, then only the mutants on that line are produced")
+    func scopeKeepsOnlyItsOwnMutants() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+        try FileHelpers.write(
+            """
+            func f() { let x = true }
+            func g() { let y = false }
+            """,
+            named: "Source.swift",
+            in: dir
+        )
+
+        let input = makeDiscoveryInput(
+            sourcesPath: dir.path,
+            operators: ["BooleanLiteralReplacement"],
+            scope: MutantScope(lineRangesByPath: ["Source.swift": [2 ... 2]])
+        )
+        let result = try await pipeline.run(input: input)
+
+        #expect(result.mutants.count == 1)
+        #expect(result.mutants[0].line == 2)
+    }
+
+    @Test("Given a scope over a file with no mutants, when run, then no mutant is produced")
+    func scopeOverUnmutatedLinesProducesNothing() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+        try FileHelpers.write("func f() { let x = true }", named: "Source.swift", in: dir)
+
+        let input = makeDiscoveryInput(
+            sourcesPath: dir.path,
+            scope: MutantScope(lineRangesByPath: ["Other.swift": [1 ... 5]])
+        )
         let result = try await pipeline.run(input: input)
 
         #expect(result.mutants.isEmpty)

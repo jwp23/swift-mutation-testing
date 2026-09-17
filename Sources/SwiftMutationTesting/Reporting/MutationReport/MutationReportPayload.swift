@@ -1,4 +1,4 @@
-struct MutationReportPayload: Sendable, Encodable {
+struct MutationReportPayload: Sendable, Codable {
     let schemaVersion: String
     let thresholds: MutationReportThresholds
     let projectRoot: String

@@ -34,5 +34,14 @@ struct RunnerConfiguration: Sendable {
         var sourcesPath: String?
         var excludePatterns: [String]
         var operators: [String]
+
+        /// `path:start-end` line sets the run is limited to.
+        var scopeLines: [String] = []
+
+        /// Git reference whose diff against the working tree limits the run.
+        var since: String?
+
+        /// Mutation report of an earlier full run, read to find the mutants a changed test killed.
+        var baselineReport: String?
     }
 }

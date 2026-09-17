@@ -25,6 +25,10 @@ enum HelpText {
           --exclude <pattern>           Exclude files matching pattern (repeatable)
           --operator <id>               Mutation operator to apply (repeatable, default: all)
           --disable-mutator <id>        Disable a specific mutation operator (repeatable)
+          --scope-lines <path:a-b>      Test only the mutants on these source lines (repeatable)
+          --since <git-ref>             Test only the mutants the diff against this ref touches
+          --baseline-report <json-path> Mutation report of an earlier full run, so that a changed
+                                        test also puts the mutants it killed back in scope
           --version                     Print version and exit
           --help                        Print this help and exit
         """
