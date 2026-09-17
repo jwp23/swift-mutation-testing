@@ -108,7 +108,8 @@ struct ConfigurationFileWriter: Sendable {
         }
 
         lines.append("")
-        lines.append("# Per-mutant test timeout in seconds (default: 30 for SPM)")
+        lines.append("# Least time a mutant's tests are given, in seconds. A suite measured slower than")
+        lines.append("# this raises it to a multiple of what those tests take (default: 30 for SPM)")
         lines.append("timeout: 30")
         lines.append(contentsOf: likelyKillerTestsSection())
         lines.append(contentsOf: reportSection(testTarget: testTarget, excludeExample: "**/Tests/**"))

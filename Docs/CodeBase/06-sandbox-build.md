@@ -41,6 +41,8 @@ Every sandbox root is created under [`SandboxDirectoryLock`](#sandboxsandboxdire
 
 `replicate` gives each worker a working directory and a build directory no other worker touches. It does not isolate *linked* products: SwiftPM bakes an absolute rpath into the test bundle, so frameworks a bundle links dynamically still load from the sandbox that built them. That is harmless — the code is identical and the mutant is selected at runtime through `__SWIFT_MUTATION_TESTING_ACTIVE`.
 
+A run replicates `max(1, min(concurrency, testable schematizable mutants)) − 1` times. Copying a build directory for a worker that has no mutant to run is pure cost, which a diff-scoped run of a handful of mutants on a many-core machine would otherwise pay once per core.
+
 **Copy strategy:**
 
 ```mermaid
