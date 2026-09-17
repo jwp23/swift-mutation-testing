@@ -11,6 +11,4 @@ enum RunnerEvent: Sendable {
 
     case fallbackBuildStarted(filePath: String)
     case fallbackBuildFinished(filePath: String, success: Bool)
-
-    case testTargetMatchedNoBundle(testTarget: String)
 }

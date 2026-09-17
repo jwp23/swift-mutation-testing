@@ -36,9 +36,6 @@ actor ConsoleProgressReporter: ProgressReporter {
 
         case .fallbackBuildFinished:
             break
-
-        case .testTargetMatchedNoBundle(let testTarget):
-            print("  ⚠ No built test bundle is named '\(testTarget)' — running every test bundle")
         }
     }
 }

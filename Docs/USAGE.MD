@@ -251,13 +251,13 @@ those bundles:
   applies to XCTest tests only. Swift Testing tests in the same bundle all run regardless, because
   the bundle's Swift Testing entry point does not take an XCTest selector;
 - if no built bundle carries that name — which is what a toolchain that merges every test target
-  into one `<Package>PackageTests.xctest` produces — every bundle runs, with any selector still
-  applied, and the run prints
-  `⚠ No built test bundle is named '<target>' — running every test bundle` so the fallback is
-  never silent.
-
-Running more tests than requested cannot change a mutant's kill/survive verdict; it only costs
-runtime.
+  into one `<Package>PackageTests.xctest` produces — there is no bundle to scope the run to, and
+  the run fails immediately with an error naming the target, rather than silently running every
+  bundle. Running broader test scope than requested can change a mutant's kill/survive verdict
+  (a test in an unrelated target may incidentally exercise the mutated code and kill a mutant the
+  requested target's own tests would have missed), so a run that cannot honor `--target` refuses
+  to run rather than produce a result that looks scoped but is not. Remove `--target` or
+  restructure the project's test targets to get a bundle per target.
 
 ### Common invocations
 

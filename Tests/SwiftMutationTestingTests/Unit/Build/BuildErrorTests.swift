@@ -30,6 +30,23 @@ struct BuildErrorTests {
         #expect(error.errorDescription == "No .xctest bundle found after build.")
     }
 
+    @Test(
+        "Given testTargetUnscopable, when errorDescription accessed, then names the target and explains the merged-bundle cause"
+    )
+    func testTargetUnscopable() {
+        let error = BuildError.testTargetUnscopable(testTarget: "MyPackagePackageTests")
+        #expect(error.errorDescription?.contains("MyPackagePackageTests") == true)
+        #expect(error.errorDescription?.contains("--target") == true)
+        #expect(error.errorDescription?.contains("merge all test targets") == true)
+    }
+
+    @Test("Given two testTargetUnscopable errors with different targets, when compared, then they are equal")
+    func testTargetUnscopableEqualityIgnoresTarget() {
+        let lhs = BuildError.testTargetUnscopable(testTarget: "A")
+        let rhs = BuildError.testTargetUnscopable(testTarget: "B")
+        #expect(lhs == rhs)
+    }
+
     @Test("Given testBundleNotFound and xctestrunNotFound, when compared, then they are not equal")
     func testBundleNotFoundIsNotXctestrunNotFound() {
         #expect(BuildError.testBundleNotFound != BuildError.xctestrunNotFound)

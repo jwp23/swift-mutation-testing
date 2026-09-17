@@ -6,8 +6,8 @@ struct TestExecutionStage: Sendable {
     /// Bundles a mutant's tests run in, and the XCTest selection applied inside them. A configured
     /// test target names the bundle with its first path component; anything after that is an
     /// XCTest selector (`Class` or `Class/method`). A target naming no bundle — what a toolchain
-    /// that merges every test target into one bundle produces — falls back to every bundle, with
-    /// any selector still applied, and is reported so the fallback is never silent.
+    /// that merges every test target into one bundle produces — cannot be scoped to at all, and
+    /// fails the run rather than silently widening it to every bundle.
     private struct BundleSelection {
         let paths: [String]
         let xctestSelection: String?
@@ -21,7 +21,7 @@ struct TestExecutionStage: Sendable {
         var results: [ExecutionResult] = []
         let concurrency = effectiveConcurrency(in: context)
 
-        await reportUnmatchedTestTarget(in: context)
+        try validateTestTargetScope(in: context)
 
         try await withThrowingTaskGroup(of: (worker: Int, result: ExecutionResult).self) { group in
             var workers = 0
@@ -60,14 +60,18 @@ struct TestExecutionStage: Sendable {
         return max(1, min(configured, context.sandboxes.count))
     }
 
-    private func reportUnmatchedTestTarget(in context: TestExecutionContext) async {
+    /// A configured `--test-target` that names no built bundle cannot be scoped to at all — the
+    /// toolchain merged every test target into one bundle, so there is nothing narrower to select
+    /// within it. Failing fast here, before any mutant runs, is safer than silently running every
+    /// bundle: broader execution can change a mutant's kill/survive verdict, not just its runtime.
+    private func validateTestTargetScope(in context: TestExecutionContext) throws {
         guard
             context.artifact.plist == nil,
             let testTarget = context.configuration.build.testTarget,
             !bundleSelection(in: context).matchedTestTarget
         else { return }
 
-        await deps.reporter.report(.testTargetMatchedNoBundle(testTarget: testTarget))
+        throw BuildError.testTargetUnscopable(testTarget: testTarget)
     }
 
     private func run(

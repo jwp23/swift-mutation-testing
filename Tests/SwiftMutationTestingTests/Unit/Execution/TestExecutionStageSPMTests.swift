@@ -166,30 +166,24 @@ struct TestExecutionStageSPMTests {
         #expect(request.arguments.last?.hasSuffix("BTests.xctest") == true)
     }
 
-    @Test("Given a test target naming no built bundle, when mutants execute, then every bundle runs and it is reported")
-    func unmatchedTestTargetIsReportedAndRunsEveryBundle() async throws {
+    @Test("Given a test target naming no built bundle, when mutants execute, then the run fails with a clear error")
+    func unmatchedTestTargetFailsTheRun() async throws {
         let dir = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(dir) }
 
         let launcher = RecordingProcessLauncher()
-        let reporter = MockProgressReporter()
         let context = makeSPMContext(
             sandboxes: [Sandbox(rootURL: dir)],
             bundlePaths: [".build/debug/ATests.xctest", ".build/debug/BTests.xctest"],
             testTarget: "MyPackagePackageTests"
         )
 
-        _ = try await makeStage(launcher: launcher, in: dir, reporter: reporter)
-            .execute(mutants: [makeSPMMutant(id: "m0")], in: context)
-
-        let requests = await launcher.requests
-        let warnedTargets = await reporter.events.compactMap { event -> String? in
-            guard case .testTargetMatchedNoBundle(let testTarget) = event else { return nil }
-            return testTarget
+        await #expect(throws: BuildError.testTargetUnscopable(testTarget: "MyPackagePackageTests")) {
+            try await makeStage(launcher: launcher, in: dir)
+                .execute(mutants: [makeSPMMutant(id: "m0")], in: context)
         }
 
-        #expect(requests.count == 2)
-        #expect(warnedTargets == ["MyPackagePackageTests"])
+        #expect(await launcher.requests.isEmpty)
     }
 
     @Test("Given fewer sandboxes than workers, when mutants execute, then no two of them are in flight together")
