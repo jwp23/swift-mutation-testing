@@ -388,6 +388,12 @@ Abstraction over process execution. `launch` discards output (stdout/stderr → 
 
 Return value `-1` from either method means the process was killed by the timeout handler.
 
+`RunnerBackedProcessLaunching: ProcessLaunching` (same file) is a protocol for conformers backed
+by a `ProcessRunner`: it requires only `func makeRunner() -> ProcessRunner` and supplies
+`launch`/`launchCapturing` as a default extension forwarding to `makeRunner()`. Both
+`SPMProcessLauncher` and `XcodeProcessLauncher` conform to it instead of duplicating the
+forwarding methods.
+
 ---
 
 ## Infrastructure/ProcessRequest.swift
@@ -432,7 +438,7 @@ Low-level process execution engine. Uses `withTaskCancellationHandler` + `withCh
 
 **Cancellation handling:** `onCancel` marks the flag and calls `onTimeout(pid)` immediately, ensuring the continuation is always resumed via the `terminationHandler`.
 
-**Post-termination cleanup:** `postTerminationCleanup` is called after every process termination (success or failure), used by `SPMProcessLauncher` to clean up escaped child processes.
+**Post-termination cleanup:** `postTerminationCleanup` is called after every process termination (success or failure); `SPMProcessLauncher` uses it to `SIGKILL` the process group.
 
 `launchCapturing` writes output to a temporary file (UUID-named) and reads it in the `terminationHandler` to avoid pipe buffer limits. Sets process group via `setpgid(pid, pid)` to enable group signaling.
 
@@ -441,17 +447,46 @@ Low-level process execution engine. Uses `withTaskCancellationHandler` + `withCh
 ## Infrastructure/SPMProcessLauncher.swift
 
 ```swift
-struct SPMProcessLauncher: Sendable, ProcessLaunching {
-    func launch(executableURL:arguments:workingDirectoryURL:timeout:) async throws -> Int32
-    func launchCapturing(_ request: ProcessRequest) async throws -> (exitCode: Int32, output: String)
+struct SPMProcessLauncher: Sendable, RunnerBackedProcessLaunching {
+    func makeRunner() -> ProcessRunner
 }
 ```
 
-SPM-specific implementation of `ProcessLaunching`. Creates a `ProcessRunner` with:
-- `onTimeout`: kills the process group via `kill(-pid, SIGKILL)` + `kill(pid, SIGKILL)`
-- `postTerminationCleanup`: calls `killEscapedChildren(sandboxPath:)` to clean up orphaned child processes
+SPM-specific implementation of `ProcessLaunching`, via the `RunnerBackedProcessLaunching`
+protocol (`launch`/`launchCapturing` come from that protocol's default extension —
+`XcodeProcessLauncher` conforms the same way). `makeRunner()` configures a `ProcessRunner` with:
+- `postTerminationCleanup`: kills the process group via `kill(-pid, SIGKILL)`
+- `onTimeout`: freezes and snapshots the launched process's descendants via
+  `frozenDescendantPIDs(of:)` *before* sending `SIGTERM`, then after a five-second grace period
+  sends `kill(-pid, SIGKILL)` and kills that snapshot via `killDescendants(_:)`
 
-**`killEscapedChildren(sandboxPath:)`** — inspects running processes via `sysctl` `KERN_PROCARGS2` to find any whose arguments contain the sandbox path prefix `xmr-`. Sends `SIGKILL` to matching processes to prevent resource leaks from spawned child processes that outlive the parent.
+**`frozenDescendantPIDs(of rootPID:)`** — `SIGSTOP`s the root's process group, then repeatedly
+walks the descendants and `SIGSTOP`s each newly discovered pid (an already-escaped descendant is
+outside the root's group, so the group stop does not reach it) until a walk finds nothing new,
+bounded at five rounds. Returns the descendants enumerated while the tree is frozen. A stopped
+process cannot fork, so nothing can appear behind the walk and land in neither the snapshot nor
+the root's process group. The tree is left stopped: `SIGTERM` still terminates a stopped process
+that does not handle it and `SIGKILL` terminates one that does, whereas resuming it would let an
+escaped descendant — which the root group's `SIGTERM` never reaches — go on forking children the
+snapshot does not name for the whole grace period. Residual race: a fork the kernel has already
+accepted when `SIGSTOP` lands still completes; ordinary POSIX signals offer no atomic
+process-group freeze.
+
+**`descendantPIDs(of rootPID:)`** — walks `kinfo_proc` (via `sysctl` `KERN_PROC_ALL`) once,
+builds a `parentPID -> [childPID]` map from each process's `kp_eproc.e_ppid`, and returns the
+transitive descendants of `rootPID`. Must be called while `rootPID` is still alive: once it
+exits and is reaped, any surviving descendant is reparented to launchd (ppid 1), severing the
+ancestry chain — which is why the snapshot is taken before `SIGTERM`, not in
+`postTerminationCleanup` after the process has already exited. Callers acting on a live root use
+`frozenDescendantPIDs(of:)` rather than calling this directly, so the walk cannot be outrun.
+
+**`killDescendants(_ snapshots:)`** — takes descendant snapshots (pid plus the kernel start time
+recorded for it), not bare pids. Sends `SIGKILL` to each pid (and the process group it leads),
+but only after re-reading the current start time for that pid and confirming it still matches
+the snapshot; a mismatch means the pid has been reused by an unrelated process since discovery,
+so that pid is skipped rather than signaled. Used on a snapshot from `frozenDescendantPIDs(of:)`
+to catch descendants that escaped the launched process's own process group (e.g. via `setsid`),
+which `kill(-pid, SIGKILL)` on the root's group does not reach.
 
 ---
 
