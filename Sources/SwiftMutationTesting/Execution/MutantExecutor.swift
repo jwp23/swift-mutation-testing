@@ -95,7 +95,11 @@ struct MutantExecutor: Sendable {
 
         do {
             let (artifact, schemaBuildExcluded) = try await buildArtifact(sandbox: sandbox, input: input, deps: deps)
-            let sandboxes = try workerSandboxes(buildSandbox: sandbox, artifact: artifact)
+            let sandboxes = try workerSandboxes(
+                buildSandbox: sandbox,
+                artifact: artifact,
+                mutantCount: testableSchematizableMutants(in: input, excluding: schemaBuildExcluded).count
+            )
             let pool = try await makePool(launcher: launcher)
             try await pool.setUp()
 
@@ -115,19 +119,40 @@ struct MutantExecutor: Sendable {
     /// for every other worker. SPM workers run the built test bundles concurrently, and a copy
     /// each keeps them out of one another's build directory. Xcode workers select their tests
     /// through an xctestrun plist against one shared build, so they need no copies.
-    private func workerSandboxes(buildSandbox: Sandbox, artifact: BuildArtifact?) throws -> [Sandbox] {
+    ///
+    /// A run never makes more sandboxes than it has mutants to put in them. Copying a build
+    /// directory is not cheap, and a scoped run of a handful of mutants on a many-core machine
+    /// would otherwise pay for a copy per core, most of them for workers with nothing to run.
+    private func workerSandboxes(
+        buildSandbox: Sandbox,
+        artifact: BuildArtifact?,
+        mutantCount: Int
+    ) throws -> [Sandbox] {
         guard artifact != nil, case .spm = configuration.build.projectType else { return [buildSandbox] }
 
         let factory = SandboxFactory()
         var sandboxes = [buildSandbox]
+        let workers = max(1, min(configuration.build.concurrency, mutantCount))
 
-        for _ in 1 ..< max(1, configuration.build.concurrency) {
+        for _ in 1 ..< workers {
             let replica = try factory.replicate(buildSandbox)
             SandboxCleaner.register(replica)
             sandboxes.append(replica)
         }
 
         return sandboxes
+    }
+
+    /// The mutants that run their tests against the schema build: every schematizable mutant the
+    /// build did not have to exclude to compile. The excluded ones are re-routed to a per-file
+    /// build of their own and never occupy a worker sandbox.
+    private func testableSchematizableMutants(
+        in input: RunnerInput,
+        excluding schemaBuildExcluded: [MutantDescriptor]
+    ) -> [MutantDescriptor] {
+        let excludedIDs = Set(schemaBuildExcluded.map(\.id))
+
+        return input.mutants.filter { $0.isSchematizable && !excludedIDs.contains($0.id) }
     }
 
     private func cleanUp(_ sandboxes: [Sandbox]) {
@@ -186,7 +211,6 @@ struct MutantExecutor: Sendable {
         let pool = context.pool
         let artifact = context.artifact
         let schemaBuildExcluded = context.schemaBuildExcluded
-        let schematizable = input.mutants.filter { $0.isSchematizable }
         let incompatible = input.mutants.filter { !$0.isSchematizable }
 
         var results: [ExecutionResult] = []
@@ -208,16 +232,18 @@ struct MutantExecutor: Sendable {
             }
         }
 
-        let excludedIDs = Set(schemaBuildExcluded.map(\.id))
-        let testableSchematizable = schematizable.filter { !excludedIDs.contains($0.id) }
+        let testableSchematizable = testableSchematizableMutants(in: input, excluding: schemaBuildExcluded)
 
         if let artifact {
+            var baseline: BaselineMeasurement?
             if case .spm = configuration.build.projectType {
-                await validateSPMBaseline(sandbox: sandboxes[0], deps: deps)
+                baseline = try await measureSPMBaseline(
+                    artifact: artifact, sandbox: sandboxes[0], deps: deps
+                )
             }
             let context = TestExecutionContext(
                 artifact: artifact, sandboxes: sandboxes, pool: pool,
-                configuration: configuration
+                configuration: configuration, baseline: baseline
             )
             results += try await runNormal(deps: deps, context: context, schematizable: testableSchematizable)
         } else if !testableSchematizable.isEmpty {
@@ -307,7 +333,7 @@ struct MutantExecutor: Sendable {
         let input = context.input
         let sandboxRoot = canonicalPath(sandbox.rootURL.path)
         let projectRoot = URL(fileURLWithPath: input.projectPath).resolvingSymlinksInPath().path
-        let errorSandboxPaths = extractErrorPaths(from: output, sandboxRoot: sandboxRoot)
+        let errorSandboxPaths = UncompilableMutants.erroringSourcePaths(in: output, sandboxRoot: sandboxRoot)
         let alreadyExcludedIDs = Set(alreadyExcluded.map(\.id))
 
         var newlyExcluded: [MutantDescriptor] = []
@@ -326,7 +352,7 @@ struct MutantExecutor: Sendable {
 
             guard !mutantsInFile.isEmpty else { continue }
 
-            newlyExcluded += excludeProblematicMutants(
+            newlyExcluded += UncompilableMutants.removeFromSandbox(
                 sandboxPath: sandboxPath,
                 originalPath: originalPath,
                 errorOutput: output,
@@ -358,16 +384,6 @@ struct MutantExecutor: Sendable {
         }
     }
 
-    private func extractErrorPaths(from output: String, sandboxRoot: String) -> Set<String> {
-        Set(
-            output.components(separatedBy: "\n").compactMap { line -> String? in
-                guard line.hasPrefix(sandboxRoot) else { return nil }
-                let path = line.components(separatedBy: ":").first ?? ""
-                return path.hasSuffix(".swift") ? path : nil
-            }
-        )
-    }
-
     private func runNormal(
         deps: ExecutionDeps,
         context: TestExecutionContext,
@@ -394,110 +410,26 @@ struct MutantExecutor: Sendable {
             .execute(mutants, configuration: configuration, pool: pool)
     }
 
-    private func validateSPMBaseline(sandbox: Sandbox, deps: ExecutionDeps) async {
-        var arguments = ["test", "--skip-build"]
-        if let testTarget = configuration.build.testTarget {
-            arguments += ["--filter", testTarget]
-        }
-
-        _ = try? await deps.launcher.launchCapturing(
-            ProcessRequest(
-                executableURL: URL(fileURLWithPath: "/usr/bin/swift"),
-                arguments: arguments,
-                environment: nil,
-                additionalEnvironment: [:],
-                workingDirectoryURL: sandbox.rootURL,
-                timeout: configuration.build.timeout
-            )
+    /// Runs the unmutated suite once, before any mutant does, in the sandbox that was built. A
+    /// suite that already fails makes every mutant look killed, so a failing baseline ends the run
+    /// here; a passing one leaves behind the timings each mutant's timeout is measured against.
+    ///
+    /// Its own timeout is the longest any mutant could be given from the configured one, since how
+    /// long the suite takes is the very thing this run exists to find out: bounding the
+    /// measurement by the per-mutant floor would end the run on any suite slower than that floor,
+    /// which is the case the measurement is for.
+    private func measureSPMBaseline(
+        artifact: BuildArtifact,
+        sandbox: Sandbox,
+        deps: ExecutionDeps
+    ) async throws -> BaselineMeasurement {
+        try await BaselineRunner(launcher: deps.launcher).measure(
+            selection: BundleSelection.resolve(
+                artifact: artifact, testTarget: configuration.build.testTarget
+            ),
+            sandbox: sandbox,
+            timeout: configuration.build.timeout * MutantTimeout.baselineCoefficient
         )
-    }
-
-    private func excludeProblematicMutants(
-        sandboxPath: String,
-        originalPath: String,
-        errorOutput: String,
-        mutantsInFile: [MutantDescriptor]
-    ) -> [MutantDescriptor] {
-        let errorLines = Set(
-            errorOutput.components(separatedBy: "\n").compactMap { line -> Int? in
-                guard line.hasPrefix(sandboxPath + ":") else { return nil }
-                let remainder = String(line.dropFirst(sandboxPath.count + 1))
-                return remainder.components(separatedBy: ":").first.flatMap { Int($0) }
-            }
-        )
-
-        guard
-            !errorLines.isEmpty,
-            let content = try? String(contentsOfFile: sandboxPath, encoding: .utf8)
-        else {
-            restoreOriginal(sandboxPath: sandboxPath, originalPath: originalPath)
-            return mutantsInFile
-        }
-
-        let lines = content.components(separatedBy: "\n")
-        let mutantIDs = Set(mutantsInFile.map(\.id))
-        var problematicIDs = Set<String>()
-
-        for errorLine in errorLines {
-            let lineIndex = errorLine - 1
-            guard lineIndex >= 0, lineIndex < lines.count else { continue }
-            var searchIndex = lineIndex
-            while searchIndex >= 0 {
-                let trimmed = lines[searchIndex].trimmingCharacters(in: .whitespaces)
-                if let id = mutantCaseID(from: trimmed), mutantIDs.contains(id) {
-                    problematicIDs.insert(id)
-                    break
-                }
-                if trimmed == "default:" || trimmed.hasPrefix("switch ") { break }
-                searchIndex -= 1
-            }
-        }
-
-        guard !problematicIDs.isEmpty else {
-            restoreOriginal(sandboxPath: sandboxPath, originalPath: originalPath)
-            return mutantsInFile
-        }
-
-        let narrowed = removingCases(problematicIDs, from: lines)
-        try? narrowed.write(toFile: sandboxPath, atomically: true, encoding: .utf8)
-
-        let excluded = mutantsInFile.filter { problematicIDs.contains($0.id) }
-        return excluded
-    }
-
-    private func restoreOriginal(sandboxPath: String, originalPath: String) {
-        try? FileManager.default.removeItem(atPath: sandboxPath)
-        try? FileManager.default.createSymbolicLink(atPath: sandboxPath, withDestinationPath: originalPath)
-    }
-
-    private func mutantCaseID(from trimmedLine: String) -> String? {
-        let casePrefix = "case \""
-        let caseSuffix = "\":"
-        guard trimmedLine.hasPrefix(casePrefix), trimmedLine.hasSuffix(caseSuffix) else { return nil }
-        let id = String(trimmedLine.dropFirst(casePrefix.count).dropLast(caseSuffix.count))
-        return id.hasPrefix("swift-mutation-testing_") ? id : nil
-    }
-
-    private func removingCases(_ ids: Set<String>, from lines: [String]) -> String {
-        var result: [String] = []
-        var skipping = false
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if let id = mutantCaseID(from: trimmed) {
-                skipping = ids.contains(id)
-                if !skipping { result.append(line) }
-            } else if skipping {
-                if trimmed == "default:" || mutantCaseID(from: trimmed) != nil {
-                    skipping = false
-                    result.append(line)
-                }
-            } else {
-                result.append(line)
-            }
-        }
-
-        return result.joined(separator: "\n")
     }
 
     private func rewriteForIncompatible(

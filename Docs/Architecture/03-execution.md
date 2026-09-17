@@ -98,6 +98,30 @@ flowchart TD
 
 `SimulatorError` conforms to `LocalizedError` and covers three failure modes: `deviceNotFound(destination:)`, `bootTimeout(udid:)`, and `cloneFailed(udid:)`. Each provides a structured `errorDescription` for diagnostics.
 
+## BaselineRunner
+
+Before any mutant runs, an SPM run's built bundles run once with no mutant selected — the schema
+falls through to its `default` branch and the original code executes. `BaselineRunner` runs them the
+way `TestExecutionStage` runs a mutant's, so what it measures is what a mutant's run costs.
+
+The run is allowed `baselineCoefficient` times the configured `--timeout`: how long the suite takes
+is what this run exists to find out, so bounding the measurement by the per-mutant floor would end
+the run on any suite slower than that floor — the case the measurement is for.
+
+A suite that fails unmutated would fail again under every mutant and report every one of them
+killed, so a failing baseline throws `BaselineError` and ends the run: `.testsFailed` names the
+failing tests, `.didNotFinish` the timeout that stopped the suite, `.runFailed` the output of a run
+that died without naming a test. A passing baseline yields a `BaselineMeasurement` — the run's wall
+clock, and each test's own duration keyed `Class/method` — which travels to `TestExecutionStage` on
+`TestExecutionContext`.
+
+`MutantTimeout` reads it: a run of the tests an XCTest selection names is given
+`baselineCoefficient` (5) times what those tests took unmutated, or the configured `--timeout`,
+whichever is longer. The configured value is the floor and never the ceiling — a mutation can
+legitimately slow code down by more than any multiple of a fast suite, and a run cut short that way
+would be reported as a timeout, which counts as caught and flatters the score. Xcode runs measure
+no baseline and use `--timeout` as given.
+
 ## TestExecutionStage
 
 Runs each mutant's tests in parallel via `withThrowingTaskGroup` — `xcodebuild test-without-building` for Xcode, the built `.xctest` bundles for SPM.
@@ -137,8 +161,11 @@ the tests named for the mutated source (`Foo.swift` → `FooTests`, where that f
 bundles twice in the same worker sandbox, which a target suite that writes into its working
 directory may notice. A failure there settles
 the mutant, and the whole suite never starts. Passing them proves nothing — only the whole suite can
-call a mutant survived — so the full run follows, out of the same per-mutant timeout, and whichever
-run fails is the one whose failing test is reported as the killer. No simulator slot is acquired — SPM tests run on the host, and one sandbox per worker is what keeps concurrent mutants out of each other's build directory.
+call a mutant survived — so the full run follows, out of the same per-mutant deadline, and whichever
+run fails is the one whose failing test is reported as the killer. The likely-killer run is held to
+its own tests' baseline on top of that shared deadline: a run of a handful of tests that overruns
+what a handful of tests takes is already hung, and letting it spend the whole suite's budget would
+leave the suite that decides survival with none. No simulator slot is acquired — SPM tests run on the host, and one sandbox per worker is what keeps concurrent mutants out of each other's build directory.
 
 **Dynamic concurrency:** the task group seeds N tasks initially, then adds one new task for each completed task, maintaining exactly N active tasks at all times.
 

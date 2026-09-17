@@ -371,6 +371,54 @@ struct TestExecutionStageSPMTests {
         #expect(requests.first?.arguments.dropLast() == ["xctest", "-XCTest", "SomeSuite"])
     }
 
+    @Test("Given a suite slower than the configured timeout, when a mutant runs, then its run scales with the baseline")
+    func mutantRunIsGivenAMultipleOfTheMeasuredBaseline() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let launcher = RecordingProcessLauncher()
+        let context = makeSPMContext(
+            sandboxes: [Sandbox(rootURL: dir)],
+            bundlePaths: [".build/debug/MyLibTests.xctest"],
+            timeout: 10,
+            baseline: BaselineMeasurement(totalDuration: 40, testDurations: [:])
+        )
+
+        _ = try await makeStage(launcher: launcher, in: dir)
+            .execute(mutants: [makeSPMMutant(id: "m0")], in: context)
+
+        let timeout = try #require(await launcher.requests.first?.timeout)
+
+        #expect(timeout <= 200 && timeout > 199)
+    }
+
+    @Test("Given likely killers for the mutant's source, when they run, then their own baseline bounds that run")
+    func likelyKillerRunIsBoundedByTheSelectionsOwnBaseline() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let launcher = RecordingProcessLauncher()
+        let context = makeSPMContext(
+            sandboxes: [Sandbox(rootURL: dir)],
+            bundlePaths: [".build/debug/MyLibTests.xctest"],
+            timeout: 10,
+            baseline: BaselineMeasurement(totalDuration: 40, testDurations: ["FooTests/testAddsUp": 8])
+        )
+
+        _ = try await makeStage(
+            launcher: launcher, in: dir, testFilePaths: [try writeXCTestFile(named: "FooTests.swift", in: dir)]
+        )
+        .execute(mutants: [makeSPMMutant(id: "m0", filePath: "/p/Sources/Foo.swift")], in: context)
+
+        let requests = await launcher.requests
+        let likelyKillerTimeout = try #require(requests.first?.timeout)
+        let fullSuiteTimeout = try #require(requests.last?.timeout)
+
+        #expect(requests.count == 2)
+        #expect(likelyKillerTimeout <= 40 && likelyKillerTimeout > 39)
+        #expect(fullSuiteTimeout <= 200 && fullSuiteTimeout > 199)
+    }
+
     @Test("Given an SPM artifact without test bundles, when mutant executed, then the error is propagated")
     func missingTestBundleFailsTheRun() async throws {
         let dir = try FileHelpers.makeTemporaryDirectory()
@@ -407,7 +455,9 @@ private func makeSPMContext(
     sandboxes: [Sandbox],
     bundlePaths: [String],
     concurrency: Int = 1,
-    testTarget: String? = nil
+    testTarget: String? = nil,
+    timeout: Double = 60,
+    baseline: BaselineMeasurement? = nil
 ) -> TestExecutionContext {
     TestExecutionContext(
         artifact: BuildArtifact(
@@ -421,9 +471,11 @@ private func makeSPMContext(
         configuration: makeRunnerConfiguration(
             projectType: .spm,
             testTarget: testTarget,
+            timeout: timeout,
             concurrency: concurrency,
             noCache: true
-        )
+        ),
+        baseline: baseline
     )
 }
 

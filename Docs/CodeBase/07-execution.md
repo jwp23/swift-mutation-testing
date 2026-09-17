@@ -32,7 +32,7 @@ flowchart TD
     TEARDOWN --> RESULTS[[ExecutionResult]]
 ```
 
-**Normal path:** builds once, runs `TestExecutionStage` for all schematizable mutants in parallel.
+**Normal path:** builds once, and for SPM runs `BaselineRunner` over the built bundles with no mutant selected before running `TestExecutionStage` for all schematizable mutants in parallel. A failing baseline ends the run; a passing one sets the scale every mutant's timeout is measured on.
 
 **Fallback path:** triggered when `BuildStage` throws `compilationFailed`. Delegates to `FallbackExecutor`, which rebuilds one schematized file at a time. Mutants in files that still fail to compile are marked `.unviable`.
 
@@ -133,6 +133,7 @@ struct TestExecutionContext: Sendable {
     let sandboxes: [Sandbox]
     let pool: SimulatorPool
     let configuration: RunnerConfiguration
+    var baseline: BaselineMeasurement?
 
     func sandbox(forWorker worker: Int) -> Sandbox
 }
@@ -146,6 +147,95 @@ Bundles the execution-time dependencies required by `TestExecutionStage` and the
 | `sandboxes` | One sandbox per worker; `sandbox(forWorker:)` hands each worker its own, wrapping when a caller supplies fewer sandboxes than workers |
 | `pool` | Simulator slot pool for acquiring/releasing parallel slots |
 | `configuration` | Full runner configuration (timeout, concurrency, testTarget, etc.) |
+| `baseline` | What the unmutated suite measured, which each mutant's timeout is derived from; `nil` where none was measured |
+
+---
+
+## Execution/BundleSelection.swift
+
+```swift
+struct BundleSelection: Sendable {
+    let paths: [String]
+    let xctestSelection: String?
+
+    static func resolve(artifact: BuildArtifact, testTarget: String?) throws -> BundleSelection
+}
+```
+
+What a configured test target selects in a build's output: the bundle its first path component
+names, and any remaining `Class/method` component as an `-XCTest` selection. An SPM target matching
+no bundle throws `BuildError.testTargetUnscopable` — the toolchain merged every test target into one
+bundle and there is nothing narrower to select, and running every bundle instead can change a
+mutant's verdict, not just its runtime. Both the baseline run and each mutant's run resolve through
+it, so they run the same tests.
+
+---
+
+## Execution/BaselineRunner.swift
+
+```swift
+struct BaselineRunner: Sendable {
+    let launcher: any ProcessLaunching
+
+    func measure(
+        selection: BundleSelection,
+        sandbox: Sandbox,
+        timeout: Double
+    ) async throws -> BaselineMeasurement
+}
+```
+
+Runs an SPM run's bundles once with no mutant selected, before any mutant runs. Bundles run in turn
+and stop at the first that exits non-zero; `BaselineOutputParser` then reads the run's per-test
+durations and any failing test out of the output.
+
+A suite that fails unmutated fails again under every mutant and reports every one of them killed, so
+the run ends here with a `BaselineError`:
+
+| Case | When |
+|---|---|
+| `testsFailed(tests:)` | The output named tests that failed |
+| `didNotFinish(seconds:)` | The run was killed by the timeout (exit code `-1`) |
+| `runFailed(output:)` | The run died non-zero without naming a failing test |
+
+---
+
+## Execution/BaselineMeasurement.swift
+
+```swift
+struct BaselineMeasurement: Sendable {
+    let totalDuration: Double
+    let testDurations: [String: Double]
+
+    func duration(ofSelection selection: String?) -> Double
+}
+```
+
+What the unmutated suite cost: the whole run's wall clock, and each test's own duration keyed
+`Class/method` — the way an XCTest selection names it, without the module prefix XCTest prints.
+`duration(ofSelection:)` sums the tests a selection names; a `nil` selection, and one no measured
+test matched, both measure the whole run.
+
+---
+
+## Execution/MutantTimeout.swift
+
+```swift
+struct MutantTimeout: Sendable {
+    static let baselineCoefficient: Double = 5
+
+    let baseline: BaselineMeasurement?
+    let configuredTimeout: Double
+
+    func seconds(forSelection selection: String?) -> Double
+}
+```
+
+How long a run of the tests a selection names may take: `baselineCoefficient` times what those
+tests took unmutated, or `configuredTimeout`, whichever is longer — and `configuredTimeout` alone
+where no baseline was measured. The configured `--timeout` is the floor and never the ceiling: a
+mutation can legitimately slow code down by more than any multiple of a fast suite, and a run cut
+short that way is reported as a timeout, which counts as caught and flatters the score.
 
 ---
 

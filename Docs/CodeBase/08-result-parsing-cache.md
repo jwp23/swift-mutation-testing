@@ -107,6 +107,27 @@ Returns `.testsKilled(reason: <first matching line>)` for test failures, `.proce
 
 ---
 
+## Execution/Parsing/BaselineOutputParser.swift
+
+```swift
+struct BaselineOutputParser: Sendable {
+    struct Result: Sendable {
+        let testDurations: [String: Double]
+        let failingTests: [String]
+    }
+
+    func parse(_ output: String) -> Result
+}
+```
+
+Reads the unmutated run's output for `BaselineRunner`: every test's own duration, keyed
+`Class/method` from the `Test Case '-[Module.Class method]' passed (0.123 seconds).` records XCTest
+prints, and every test the run reported as failed — by the same rules `TestOutputParser` uses, so
+XCTest and Swift Testing failures are both recognised. A test that failed is still measured; it
+took its time whatever its verdict.
+
+---
+
 ## Execution/Parsing/SPMResultParser.swift
 
 ```swift

@@ -3,17 +3,6 @@ import Foundation
 struct TestExecutionStage: Sendable {
     let deps: ExecutionDeps
 
-    /// Bundles a mutant's tests run in, and the XCTest selection applied inside them. A configured
-    /// test target names the bundle with its first path component; anything after that is an
-    /// XCTest selector (`Class` or `Class/method`). A target naming no bundle — what a toolchain
-    /// that merges every test target into one bundle produces — cannot be scoped to at all, and
-    /// fails the run rather than silently widening it to every bundle.
-    private struct BundleSelection {
-        let paths: [String]
-        let xctestSelection: String?
-        let matchedTestTarget: Bool
-    }
-
     func execute(
         mutants: [MutantDescriptor],
         in context: TestExecutionContext
@@ -21,7 +10,10 @@ struct TestExecutionStage: Sendable {
         var results: [ExecutionResult] = []
         let concurrency = effectiveConcurrency(in: context)
 
-        try validateTestTargetScope(in: context)
+        // Resolved before any mutant runs so a test target that cannot be scoped to fails the run
+        // rather than silently widening it, which can change a mutant's verdict and not just its
+        // runtime.
+        _ = try bundleSelection(in: context)
 
         try await withThrowingTaskGroup(of: (worker: Int, result: ExecutionResult).self) { group in
             var workers = 0
@@ -58,20 +50,6 @@ struct TestExecutionStage: Sendable {
         guard context.artifact.plist == nil else { return configured }
 
         return max(1, min(configured, context.sandboxes.count))
-    }
-
-    /// A configured `--test-target` that names no built bundle cannot be scoped to at all — the
-    /// toolchain merged every test target into one bundle, so there is nothing narrower to select
-    /// within it. Failing fast here, before any mutant runs, is safer than silently running every
-    /// bundle: broader execution can change a mutant's kill/survive verdict, not just its runtime.
-    private func validateTestTargetScope(in context: TestExecutionContext) throws {
-        guard
-            context.artifact.plist == nil,
-            let testTarget = context.configuration.build.testTarget,
-            !bundleSelection(in: context).matchedTestTarget
-        else { return }
-
-        throw BuildError.testTargetUnscopable(testTarget: testTarget)
     }
 
     private func run(
@@ -166,27 +144,33 @@ struct TestExecutionStage: Sendable {
     /// Runs the mutant's tests in the worker's sandbox, selecting the mutant through the
     /// environment. The tests named for the mutated source run first: one of them failing settles
     /// the mutant without the whole suite ever starting, while all of them passing proves nothing
-    /// — only the whole suite can call a mutant survived, so it runs next. Both runs come out of
-    /// the one per-mutant timeout, and each stops at the first test that fails rather than
-    /// finishing its suite: one failing test already kills the mutant and names its killer, so
-    /// every test after it is work that cannot change the result.
+    /// — only the whole suite can call a mutant survived, so it runs next. Each run stops at the
+    /// first test that fails rather than finishing its suite: one failing test already kills the
+    /// mutant and names its killer, so every test after it is work that cannot change the result.
+    ///
+    /// Both runs share the one per-mutant deadline, and the first of them is held to its own
+    /// tests' baseline on top of that — a run of a handful of tests that overruns what a handful
+    /// of tests takes is already hung, and letting it spend the whole suite's budget would leave
+    /// the suite that decides survival with none.
     private func launchSPM(
         mutant: MutantDescriptor,
         worker: Int,
         in context: TestExecutionContext
     ) async throws -> TestLaunchResult {
-        let selection = bundleSelection(in: context)
+        let selection = try bundleSelection(in: context)
 
         guard !selection.paths.isEmpty else { throw BuildError.testBundleNotFound }
 
         let sandbox = context.sandbox(forWorker: worker)
+        let timeout = mutantTimeout(in: context)
         let start = Date()
-        let deadline = start.addingTimeInterval(context.configuration.build.timeout)
+        let deadline = start.addingTimeInterval(timeout.seconds(forSelection: selection.xctestSelection))
 
         if let likelyKillers = likelyKillerSelection(for: mutant, given: selection) {
             let run = try await runBundles(
                 selection.paths, selecting: likelyKillers,
-                mutant: mutant, sandbox: sandbox, deadline: deadline
+                mutant: mutant, sandbox: sandbox,
+                deadline: min(deadline, Date().addingTimeInterval(timeout.seconds(forSelection: likelyKillers)))
             )
 
             if run.exitCode != 0 {
@@ -275,24 +259,14 @@ struct TestExecutionStage: Sendable {
         return (exitCode, output, stoppedAtFirstFailure)
     }
 
-    private func bundleSelection(in context: TestExecutionContext) -> BundleSelection {
-        let allPaths = context.artifact.testBundlePaths
-
-        guard let testTarget = context.configuration.build.testTarget else {
-            return BundleSelection(paths: allPaths, xctestSelection: nil, matchedTestTarget: true)
-        }
-
-        var components = testTarget.components(separatedBy: "/")
-        let targetName = components.removeFirst()
-        let matching = allPaths.filter {
-            URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent == targetName
-        }
-
-        return BundleSelection(
-            paths: matching.isEmpty ? allPaths : matching,
-            xctestSelection: components.isEmpty ? nil : components.joined(separator: "/"),
-            matchedTestTarget: !matching.isEmpty
+    private func bundleSelection(in context: TestExecutionContext) throws -> BundleSelection {
+        try BundleSelection.resolve(
+            artifact: context.artifact, testTarget: context.configuration.build.testTarget
         )
+    }
+
+    private func mutantTimeout(in context: TestExecutionContext) -> MutantTimeout {
+        MutantTimeout(baseline: context.baseline, configuredTimeout: context.configuration.build.timeout)
     }
 
     private func launch(

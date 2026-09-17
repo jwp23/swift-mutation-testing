@@ -109,7 +109,8 @@ destination: platform=iOS Simulator,name=iPhone 16
 # Limit test execution to a specific target (recommended when the project has UI tests)
 # testTarget: MyAppTests
 
-# Per-mutant test timeout in seconds (default: 120 Xcode, 30 SPM)
+# Least time a mutant's tests are given, in seconds; a suite measured slower than this
+# raises it (default: 120 Xcode, 30 SPM)
 timeout: 60
 
 # Number of parallel workers (default: max(1, CPU count - 1))
@@ -157,7 +158,7 @@ mutators:
 | `scheme` | String | — | Xcode scheme to build and test (required for Xcode projects, omit for SPM) |
 | `destination` | String | — | `xcodebuild` destination specifier (required for Xcode projects, omit for SPM) |
 | `testTarget` | String | — | Limit test execution to this target (Xcode: `-only-testing`; SPM: see [Limiting tests to a target](#limiting-tests-to-a-target)) |
-| `timeout` | Number | `120` (Xcode) / `30` (SPM) | Per-mutant test timeout in seconds |
+| `timeout` | Number | `120` (Xcode) / `30` (SPM) | Least time a mutant's tests are given, in seconds (see [Per-mutant timeouts](#per-mutant-timeouts)) |
 | `concurrency` | Number | `max(1, CPUs − 1)` | Number of parallel test workers |
 | `noCache` | Boolean | `false` | Disable result caching |
 | `output` | String | — | Path for Stryker-compatible JSON report |
@@ -228,7 +229,7 @@ swift-mutation-testing [project-path] [options]
 | `--scheme <scheme>` | Xcode scheme to build and test (required for Xcode, omit for SPM) |
 | `--destination <destination>` | `xcodebuild` destination specifier (required for Xcode, omit for SPM) |
 | `--target <test-target>` | Limit test execution to this target (see [Limiting tests to a target](#limiting-tests-to-a-target)) |
-| `--timeout <seconds>` | Per-mutant test timeout (default: 120 Xcode, 30 SPM) |
+| `--timeout <seconds>` | Least time a mutant's tests are given (default: 120 Xcode, 30 SPM) |
 | `--concurrency <n>` | Parallel workers (default: CPUs − 1) |
 | `--no-cache` | Disable result caching |
 | `--output <path>` | Write Stryker-compatible JSON report |
@@ -349,6 +350,36 @@ Scope: Sources/Foo.swift:10-20, Tests/FooTests.swift:all
 
 Any report `--output`, `--html-output` or `--sonar-output` asked for is still written, holding no
 mutants, so CI steps that expect the file to exist after every run still find it.
+### Per-mutant timeouts
+
+Before any mutant runs, an SPM package's test suite runs once unmutated, in the built sandbox, the
+same way a mutant's tests run. That baseline does two things.
+
+It checks the suite passes to begin with. A suite that already fails would fail again under every
+mutant and report every one of them killed, so a failing baseline ends the run instead, naming the
+tests to fix:
+
+```
+The test suite fails before any mutation is applied, so every mutant would be reported killed by a
+failure that is already there. Fix these tests first:
+  - MyLibTests.ParserTests.testTrailingComma
+```
+
+It also times the suite, and each mutant's timeout is set from what the tests it runs took
+unmutated — five times that, or `--timeout`, whichever is longer. `--timeout` is therefore the
+*least* time a mutant gets, never a cap: a suite slower than it raises the timeout to match, so a
+slow suite stops reporting honest survivors as timeouts, and no project that runs today starts
+timing out because of the measurement. A mutation can legitimately make code slower than any
+multiple of a fast suite — a loop that runs longer, a cache that stops hitting — and `--timeout` is
+the patience you keep for that.
+
+The baseline run itself is allowed five times `--timeout` — how long the suite takes is the very
+thing it exists to find out, so holding it to the per-mutant floor would end the run on exactly the
+slow suites the measurement is for. A suite slower even than that ends the run asking for a higher
+`--timeout`.
+
+Xcode projects run no baseline: their tests are selected through an xctestrun plist rather than by
+running bundles, so `--timeout` is used exactly as given.
 
 ### Common invocations
 
