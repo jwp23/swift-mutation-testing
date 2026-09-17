@@ -179,7 +179,8 @@ struct TestExecutionStageSPMTests {
         let context = makeSPMContext(
             sandboxes: [Sandbox(rootURL: dir)],
             bundlePaths: [".build/debug/ATests.xctest", ".build/debug/BTests.xctest"],
-            testTarget: "BTests/SomeSuite/testSomething"
+            testTarget: "BTests/SomeSuite/testSomething",
+            testingFramework: .xctest
         )
 
         _ = try await makeStage(launcher: launcher, in: dir)
@@ -357,7 +358,8 @@ struct TestExecutionStageSPMTests {
         let context = makeSPMContext(
             sandboxes: [Sandbox(rootURL: dir)],
             bundlePaths: [".build/debug/MyLibTests.xctest"],
-            testTarget: "MyLibTests/SomeSuite"
+            testTarget: "MyLibTests/SomeSuite",
+            testingFramework: .xctest
         )
 
         _ = try await makeStage(
@@ -456,6 +458,7 @@ private func makeSPMContext(
     bundlePaths: [String],
     concurrency: Int = 1,
     testTarget: String? = nil,
+    testingFramework: TestingFramework = .swiftTesting,
     timeout: Double = 60,
     baseline: BaselineMeasurement? = nil
 ) -> TestExecutionContext {
@@ -471,6 +474,7 @@ private func makeSPMContext(
         configuration: makeRunnerConfiguration(
             projectType: .spm,
             testTarget: testTarget,
+            testingFramework: testingFramework,
             timeout: timeout,
             concurrency: concurrency,
             noCache: true

@@ -50,7 +50,7 @@ struct MutantExecutorBaselineTests {
         )
 
         let results = try await makeExecutor(
-            launcher: launcher, timeout: 5, testTarget: "FixtureTests/FooTests", in: dir
+            launcher: launcher, timeout: 5, testTarget: "FixtureTests/FooTests", testingFramework: .xctest, in: dir
         )
         .execute(makeBaselineInput(in: dir))
 
@@ -66,11 +66,13 @@ private func makeExecutor(
     launcher: any ProcessLaunching,
     timeout: Double = 60,
     testTarget: String? = nil,
+    testingFramework: TestingFramework = .swiftTesting,
     in dir: URL
 ) -> MutantExecutor {
     MutantExecutor(
         configuration: makeRunnerConfiguration(
-            projectPath: dir.path, projectType: .spm, testTarget: testTarget, timeout: timeout
+            projectPath: dir.path, projectType: .spm, testTarget: testTarget,
+            testingFramework: testingFramework, timeout: timeout
         ),
         launcher: launcher
     )

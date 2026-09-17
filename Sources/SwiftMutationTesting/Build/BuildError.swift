@@ -5,6 +5,7 @@ enum BuildError: Error, Equatable, LocalizedError {
     case xctestrunNotFound
     case testBundleNotFound
     case testTargetUnscopable(testTarget: String)
+    case testTargetIncompatibleWithSwiftTesting(testTarget: String)
 
     var errorDescription: String? {
         switch self {
@@ -24,6 +25,13 @@ enum BuildError: Error, Equatable, LocalizedError {
                 "--target \(testTarget) matched no test bundle in this project's build output "
                 + "— this SwiftPM project appears to merge all test targets into one bundle, which this "
                 + "flag cannot scope to; remove --target or restructure the project's test targets."
+
+        case .testTargetIncompatibleWithSwiftTesting(let testTarget):
+            return
+                "--target \(testTarget) selects a class or method, but this project's tests are "
+                + "Swift Testing — there is no XCTest selector that can scope to specific Swift Testing "
+                + "tests, so this would silently run none of them; use a bundle-level --target "
+                + "(no class/method suffix) instead."
         }
     }
 
@@ -33,6 +41,7 @@ enum BuildError: Error, Equatable, LocalizedError {
         case (.xctestrunNotFound, .xctestrunNotFound): return true
         case (.testBundleNotFound, .testBundleNotFound): return true
         case (.testTargetUnscopable, .testTargetUnscopable): return true
+        case (.testTargetIncompatibleWithSwiftTesting, .testTargetIncompatibleWithSwiftTesting): return true
         default: return false
         }
     }

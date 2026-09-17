@@ -247,7 +247,9 @@ struct MutantExecutor: Sendable {
             )
             results += try await runNormal(deps: deps, context: context, schematizable: testableSchematizable)
         } else if !testableSchematizable.isEmpty {
-            results += try await runFallback(deps: deps, input: input, pool: pool)
+            results += try await runFallback(
+                deps: deps, input: input, mutants: testableSchematizable, pool: pool
+            )
         }
 
         results += try await runIncompatible(
@@ -395,10 +397,11 @@ struct MutantExecutor: Sendable {
     private func runFallback(
         deps: ExecutionDeps,
         input: RunnerInput,
+        mutants: [MutantDescriptor],
         pool: SimulatorPool
     ) async throws -> [ExecutionResult] {
         try await FallbackExecutor(deps: deps, configuration: configuration)
-            .execute(input: input, pool: pool)
+            .execute(input: input, mutants: mutants, pool: pool)
     }
 
     private func runIncompatible(
@@ -425,7 +428,9 @@ struct MutantExecutor: Sendable {
     ) async throws -> BaselineMeasurement {
         try await BaselineRunner(launcher: deps.launcher).measure(
             selection: BundleSelection.resolve(
-                artifact: artifact, testTarget: configuration.build.testTarget
+                artifact: artifact,
+                testTarget: configuration.build.testTarget,
+                testingFramework: configuration.build.testingFramework
             ),
             sandbox: sandbox,
             timeout: configuration.build.timeout * MutantTimeout.baselineCoefficient

@@ -2,11 +2,18 @@ struct FallbackExecutor: Sendable {
     let deps: ExecutionDeps
     let configuration: RunnerConfiguration
 
-    func execute(input: RunnerInput, pool: SimulatorPool) async throws -> [ExecutionResult] {
+    /// Tests the given mutants from a build of their own file, one file at a time. The mutants are
+    /// passed in rather than read back off the input: a run reaches the fallback with some of its
+    /// mutants already routed elsewhere, and testing those here would report them a second time.
+    func execute(
+        input: RunnerInput,
+        mutants: [MutantDescriptor],
+        pool: SimulatorPool
+    ) async throws -> [ExecutionResult] {
         var results: [ExecutionResult] = []
 
         for file in input.schematizedFiles {
-            results += try await processFile(file: file, input: input, pool: pool)
+            results += try await processFile(file: file, mutants: mutants, input: input, pool: pool)
         }
 
         return results
@@ -14,10 +21,11 @@ struct FallbackExecutor: Sendable {
 
     private func processFile(
         file: SchematizedFile,
+        mutants: [MutantDescriptor],
         input: RunnerInput,
         pool: SimulatorPool
     ) async throws -> [ExecutionResult] {
-        let fileMutants = input.mutants.filter { $0.filePath == file.originalPath && $0.isSchematizable }
+        let fileMutants = mutants.filter { $0.filePath == file.originalPath && $0.isSchematizable }
 
         guard !fileMutants.isEmpty else { return [] }
 

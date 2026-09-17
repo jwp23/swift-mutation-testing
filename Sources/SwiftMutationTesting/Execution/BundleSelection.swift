@@ -14,7 +14,9 @@ struct BundleSelection: Sendable {
     /// to every bundle: broader execution can change a mutant's kill/survive verdict, not just its
     /// runtime. Xcode builds select their tests through an xctestrun plist instead of a bundle
     /// list, so a target of theirs is never resolved against one.
-    static func resolve(artifact: BuildArtifact, testTarget: String?) throws -> BundleSelection {
+    static func resolve(
+        artifact: BuildArtifact, testTarget: String?, testingFramework: TestingFramework
+    ) throws -> BundleSelection {
         let allPaths = artifact.testBundlePaths
 
         guard let testTarget else {
@@ -31,9 +33,20 @@ struct BundleSelection: Sendable {
             throw BuildError.testTargetUnscopable(testTarget: testTarget)
         }
 
+        let xctestSelection = components.isEmpty ? nil : components.joined(separator: "/")
+
+        // An XCTest selector built here cannot also scope Swift Testing tests in the same
+        // bundle — running one would silently run zero of the other, which can turn a real
+        // mutant kill into a false Survived. Fail rather than silently under-running the suite.
+        // SPM only: Xcode builds scope through `-only-testing` instead (see `launch(...)`),
+        // which handles a Swift Testing class/method target correctly.
+        if xctestSelection != nil, artifact.plist == nil, testingFramework == .swiftTesting {
+            throw BuildError.testTargetIncompatibleWithSwiftTesting(testTarget: testTarget)
+        }
+
         return BundleSelection(
             paths: matching.isEmpty ? allPaths : matching,
-            xctestSelection: components.isEmpty ? nil : components.joined(separator: "/")
+            xctestSelection: xctestSelection
         )
     }
 }

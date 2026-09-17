@@ -330,12 +330,22 @@ struct SandboxFactory: Sendable {
         let sourcesURL = sandboxURL.appendingPathComponent("Sources")
 
         if FileManager.default.fileExists(atPath: sourcesURL.path) {
-            let targetURL = firstSourcesTargetDirectory(in: sourcesURL) ?? sourcesURL
-            try content.write(
-                to: targetURL.appendingPathComponent("__SMTSupport.swift"),
-                atomically: true,
-                encoding: .utf8
+            var targetURLs = schematizedTargetDirectories(
+                in: schematizedFiles,
+                sourcesURL: sourcesURL,
+                projectURL: projectURL
             )
+            if targetURLs.isEmpty {
+                targetURLs = [firstSourcesTargetDirectory(in: sourcesURL) ?? sourcesURL]
+            }
+
+            for targetURL in targetURLs {
+                try content.write(
+                    to: targetURL.appendingPathComponent("__SMTSupport.swift"),
+                    atomically: true,
+                    encoding: .utf8
+                )
+            }
             return
         }
 
@@ -352,6 +362,35 @@ struct SandboxFactory: Sendable {
         let existing = (try? String(contentsOf: resolvedURL, encoding: .utf8)) ?? ""
 
         try (existing + "\n" + content).write(to: sandboxFileURL, atomically: true, encoding: .utf8)
+    }
+
+    private func schematizedTargetDirectories(
+        in schematizedFiles: [SchematizedFile],
+        sourcesURL: URL,
+        projectURL: URL
+    ) -> Set<URL> {
+        let projectPath = projectURL.path
+        var targetDirectories: Set<URL> = []
+
+        for file in schematizedFiles {
+            let originalPath = URL(fileURLWithPath: file.originalPath).resolvingSymlinksInPath().path
+            guard originalPath.hasPrefix(projectPath) else { continue }
+
+            let relative = String(originalPath.dropFirst(projectPath.count + 1))
+            let components = relative.components(separatedBy: "/")
+            guard let sourcesIndex = components.firstIndex(of: "Sources"),
+                sourcesIndex + 1 < components.count
+            else { continue }
+
+            let isDirectlyInSources = sourcesIndex + 2 == components.count
+            let targetURL =
+                isDirectlyInSources
+                ? sourcesURL
+                : sourcesURL.appendingPathComponent(components[sourcesIndex + 1])
+            targetDirectories.insert(targetURL)
+        }
+
+        return targetDirectories
     }
 
     private func firstSourcesTargetDirectory(in sourcesURL: URL) -> URL? {

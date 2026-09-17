@@ -184,6 +184,8 @@ flowchart TD
 
 For each schematized file, `FallbackExecutor` creates a sandbox containing only that file's schematization, builds it, and runs the test suite against its mutants. Files whose builds fail have all their mutants marked as `.unviable`. Results are cached via `CacheStore`.
 
+`MutantExecutor` passes in the mutants to test rather than letting the fallback read them off `RunnerInput`. A schema build that narrowed itself before failing has already rerouted the mutants it excluded to `IncompatibleMutantExecutor`, and testing those in the fallback as well would report them twice.
+
 ## IncompatibleMutantExecutor
 
 Handles mutants that cannot be schematized — mutations outside function bodies (e.g. in stored property initializers or global scope). Each incompatible mutant requires a full build + test cycle.
