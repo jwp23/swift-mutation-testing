@@ -1,6 +1,15 @@
 import Foundation
 
+/// Invoked after a sandbox directory is created and before its owner pid is recorded. Tests use
+/// it to hold that window open and prove a concurrent sweep is kept out by the sandbox lock.
+nonisolated(unsafe) var sandboxRootCreatedHook: (@Sendable () -> Void)?
+
 struct SandboxFactory: Sendable {
+    /// Name of the hidden file written at the root of each sandbox, recording the pid of the
+    /// process that created it. `SandboxCleaner.removeOrphaned` uses it to remove only
+    /// sandboxes whose owning process is no longer running.
+    static let ownerPidFileName = ".owner-pid"
+
     func create(
         projectPath: String,
         schematizedFiles: [SchematizedFile],
@@ -67,11 +76,20 @@ struct SandboxFactory: Sendable {
         return Sandbox(rootURL: sandboxURL)
     }
 
-    private func makeSandboxRoot() throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("xmr-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
+    /// Creates a sandbox root and records its owner pid under the sandbox lock, so a concurrent
+    /// sweep cannot see the directory before it is claimed.
+    func makeSandboxRoot(in directory: URL = FileManager.default.temporaryDirectory) throws -> URL {
+        try SandboxDirectoryLock.withExclusiveLock(in: directory) {
+            let url = directory.appendingPathComponent("xmr-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            sandboxRootCreatedHook?()
+            try String(ProcessInfo.processInfo.processIdentifier).write(
+                to: url.appendingPathComponent(Self.ownerPidFileName),
+                atomically: true,
+                encoding: .utf8
+            )
+            return url
+        }
     }
 
     private func populateDirectory(

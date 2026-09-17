@@ -28,6 +28,8 @@ struct SandboxFactory: Sendable {
 
 Creates an isolated copy of the project in `$TMPDIR/xmr-<UUID>/`. Supports both Xcode and SPM projects. The original project is never modified.
 
+Every sandbox root is created under [`SandboxDirectoryLock`](#sandboxsandboxdirectorylockswift) and records the creating process id in `.owner-pid`, which is how `SandboxCleaner.removeOrphaned` tells a live run's sandbox from an abandoned one.
+
 **Three factory methods:**
 
 | Method | Used by | Description |
@@ -96,12 +98,28 @@ Handles cleanup of orphaned and active sandbox directories.
 
 | Method | Description |
 |---|---|
-| `removeOrphaned(in:)` | Scans the directory for `xmr-*` entries and removes them. Called once at startup to clean up sandboxes from interrupted runs |
+| `removeOrphaned(in:)` | Scans the directory for `xmr-*` entries and removes those whose `.owner-pid` names a process that is no longer running. Called once at startup to clean up sandboxes from interrupted runs, leaving concurrent runs' sandboxes intact. An entry with no readable pid record is treated as orphaned |
 | `register(_:)` | Stores the sandbox root path in a C pointer accessible to signal handlers |
 | `deregister()` | Clears the stored path and deallocates the pointer |
 | `installSignalHandlers()` | Installs `SIGINT` and `SIGTERM` handlers that remove the active sandbox and call `_exit(1)` |
 
 The active sandbox path is stored as a `nonisolated(unsafe)` `UnsafeMutablePointer<CChar>` at module scope — necessary because C signal handlers cannot capture Swift context. `register`/`deregister` are called sequentially from `MutantExecutor.execute`, so no concurrent access occurs during normal operation.
+
+---
+
+## Sandbox/SandboxDirectoryLock.swift
+
+```swift
+enum SandboxDirectoryLock {
+    static let fileName = ".swift-mutation-testing-sandbox.lock"
+    struct AcquisitionFailed: Error {}
+    static func withExclusiveLock<T>(in directory: URL, _ body: () throws -> T) throws -> T
+}
+```
+
+Interprocess exclusive lock serializing sandbox creation against the orphan sweep. A sandbox directory exists briefly before its `.owner-pid` file is written; a sweep enumerating during that window would see an unowned directory and delete a live run's sandbox. `SandboxFactory.makeSandboxRoot` holds the lock from directory creation through the pid write, and `SandboxCleaner.removeOrphaned` holds it across enumeration, liveness checks and deletion.
+
+The lock is an advisory `flock(2)` on `$TMPDIR/.swift-mutation-testing-sandbox.lock` — beside the sandboxes, never inside one. The kernel releases it when the holding process exits, so a crashed run cannot strand it. If the lock file cannot be opened, or the `flock(2)` call itself fails for a non-retryable reason, `withExclusiveLock` throws `AcquisitionFailed` rather than running unlocked — running unlocked would reopen the exact race this lock exists to close. `makeSandboxRoot` propagates that error (sandbox creation fails outright); `removeOrphaned` is nonthrowing and catches it to skip that sweep pass.
 
 ---
 
