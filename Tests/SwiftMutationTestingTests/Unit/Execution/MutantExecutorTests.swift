@@ -576,9 +576,11 @@ struct MutantExecutorTests {
             testTarget: "FooTests"
         )
 
+        // The mocked build's bundle name has to match the configured target, or there is nothing
+        // to scope the run to and it fails fast instead.
         let executor = MutantExecutor(
             configuration: config,
-            launcher: MockProcessLauncher(exitCode: 0)
+            launcher: MockProcessLauncher(exitCode: 0, testBundleName: "FooTests")
         )
         let mutant = makeMutantDescriptor(
             id: "m0",

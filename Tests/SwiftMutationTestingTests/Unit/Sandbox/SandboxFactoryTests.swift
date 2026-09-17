@@ -418,6 +418,41 @@ struct SandboxFactoryTests {
         #expect(content.contains("case \"abc-123\":"))
     }
 
+    @Test("Given a built sandbox, when replicated, then the copy owns build products and keeps symlinks")
+    func replicateCopiesBuildProductsAndKeepsSymlinks() async throws {
+        let projectDir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(projectDir) }
+
+        try FileHelpers.write("original content", named: "File.swift", in: projectDir)
+
+        let sandbox = try await factory.create(
+            projectPath: projectDir.path,
+            schematizedFiles: [],
+            supportFileContent: ""
+        )
+        defer { try? sandbox.cleanup() }
+
+        let productsDir = sandbox.rootURL.appendingPathComponent(".build/debug")
+        try FileManager.default.createDirectory(at: productsDir, withIntermediateDirectories: true)
+        try FileHelpers.write("bundle", named: "MyLibTests.xctest", in: productsDir)
+
+        let replica = try factory.replicate(sandbox)
+        defer { try? replica.cleanup() }
+
+        let replicatedBundle = replica.rootURL.appendingPathComponent(".build/debug/MyLibTests.xctest")
+        let replicatedSource = replica.rootURL.appendingPathComponent("File.swift")
+        let isSymbolicLink = try replicatedSource.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink
+        let ownerPid = try String(
+            contentsOf: replica.rootURL.appendingPathComponent(SandboxFactory.ownerPidFileName),
+            encoding: .utf8
+        )
+
+        #expect(replica.rootURL != sandbox.rootURL)
+        #expect(try String(contentsOf: replicatedBundle, encoding: .utf8) == "bundle")
+        #expect(isSymbolicLink == true)
+        #expect(ownerPid == String(ProcessInfo.processInfo.processIdentifier))
+    }
+
     @Test("Given created sandbox, when cleanup called, then sandbox directory no longer exists")
     func cleanupRemovesSandboxDirectory() async throws {
         let projectDir = try FileHelpers.makeTemporaryDirectory()

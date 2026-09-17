@@ -156,14 +156,72 @@ struct BuildStageTests {
         let projectDir = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(projectDir) }
 
+        try makeTestBundles(named: ["MyLibTests"], in: projectDir)
+
         let sandbox = Sandbox(rootURL: projectDir)
-        let stage = BuildStage(launcher: MockProcessLauncher(exitCode: 0))
+        let stage = BuildStage(launcher: MockProcessLauncher(exitCode: 0, producesTestBundle: false))
 
         let artifact = try await stage.buildSPM(sandbox: sandbox, timeout: 60)
 
         #expect(artifact.derivedDataPath == projectDir.appendingPathComponent(".build").path)
         #expect(artifact.xctestrunURL == nil)
         #expect(artifact.plist == nil)
+    }
+
+    @Test("Given built test bundles, when buildSPM called, then their sandbox-relative paths are returned")
+    func spmBuildReturnsTestBundlePaths() async throws {
+        let projectDir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(projectDir) }
+
+        try makeTestBundles(named: ["BTests", "ATests"], in: projectDir)
+
+        let sandbox = Sandbox(rootURL: projectDir)
+        let stage = BuildStage(launcher: MockProcessLauncher(exitCode: 0, producesTestBundle: false))
+
+        let artifact = try await stage.buildSPM(sandbox: sandbox, timeout: 60)
+
+        #expect(
+            artifact.testBundlePaths == [
+                ".build/debug/ATests.xctest", ".build/debug/BTests.xctest",
+            ]
+        )
+    }
+
+    @Test("Given SwiftPM's symlinked products directory, when buildSPM called, then the bundle behind it is found")
+    func spmBuildFindsBundlesBehindProductsSymlink() async throws {
+        let projectDir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(projectDir) }
+
+        let realProductsDir = projectDir.appendingPathComponent(".build/arm64-apple-macosx/debug")
+        try FileManager.default.createDirectory(at: realProductsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: realProductsDir.appendingPathComponent("MyLibTests.xctest"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createSymbolicLink(
+            atPath: projectDir.appendingPathComponent(".build/debug").path,
+            withDestinationPath: "arm64-apple-macosx/debug"
+        )
+
+        let sandbox = Sandbox(rootURL: projectDir)
+        let stage = BuildStage(launcher: MockProcessLauncher(exitCode: 0, producesTestBundle: false))
+
+        let artifact = try await stage.buildSPM(sandbox: sandbox, timeout: 60)
+
+        #expect(artifact.testBundlePaths == [".build/debug/MyLibTests.xctest"])
+    }
+
+    @Test("Given SPM build producing no test bundle, when buildSPM called, then throws testBundleNotFound")
+    func spmBuildWithoutTestBundleThrows() async throws {
+        let projectDir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(projectDir) }
+
+        let sandbox = Sandbox(rootURL: projectDir)
+        let stage = BuildStage(launcher: MockProcessLauncher(exitCode: 0, producesTestBundle: false))
+
+        await #expect(throws: BuildError.testBundleNotFound) {
+            try await stage.buildSPM(sandbox: sandbox, timeout: 60)
+        }
     }
 
     @Test("Given SPM build failure, when buildSPM called, then throws compilationFailed")
@@ -182,4 +240,16 @@ struct BuildStageTests {
         }
     }
 
+}
+
+private func makeTestBundles(named names: [String], in sandboxRoot: URL) throws {
+    let productsDir = sandboxRoot.appendingPathComponent(".build/debug")
+    try FileManager.default.createDirectory(at: productsDir, withIntermediateDirectories: true)
+
+    for name in names {
+        try FileManager.default.createDirectory(
+            at: productsDir.appendingPathComponent("\(name).xctest"),
+            withIntermediateDirectories: true
+        )
+    }
 }

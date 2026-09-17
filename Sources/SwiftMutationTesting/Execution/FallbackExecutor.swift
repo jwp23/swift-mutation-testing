@@ -65,7 +65,7 @@ struct FallbackExecutor: Sendable {
         }
 
         let context = TestExecutionContext(
-            artifact: artifact, sandbox: sandbox, pool: pool,
+            artifact: artifact, sandboxes: [sandbox], pool: pool,
             configuration: configuration
         )
 

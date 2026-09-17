@@ -1,10 +1,10 @@
 import Foundation
 
-nonisolated(unsafe) private var activeSandboxPath: UnsafeMutablePointer<CChar>?
+nonisolated(unsafe) private var activeSandboxPaths: [UnsafeMutablePointer<CChar>] = []
 nonisolated(unsafe) var sandboxCleanerExitHandler: @convention(c) (Int32) -> Void = { code in _exit(code) }
 
 private func handleSignal(_: Int32) {
-    SandboxCleaner.cleanupActiveSandbox()
+    SandboxCleaner.cleanupActiveSandboxes()
     sandboxCleanerExitHandler(1)
 }
 
@@ -12,13 +12,15 @@ enum SandboxCleaner {
 
     private static let prefix = "xmr-"
 
-    static func cleanupActiveSandbox() {
-        if let path = activeSandboxPath {
+    /// Removes every sandbox registered for this run. A run holds one sandbox per worker, so all
+    /// of them have to go when the run is interrupted.
+    static func cleanupActiveSandboxes() {
+        for path in activeSandboxPaths {
             let url = URL(fileURLWithPath: String(cString: path))
             try? FileManager.default.removeItem(at: url)
             path.deallocate()
-            activeSandboxPath = nil
         }
+        activeSandboxPaths = []
     }
 
     /// Sweeps under the sandbox lock so enumeration, liveness checks and deletion cannot overlap
@@ -60,14 +62,14 @@ enum SandboxCleaner {
         let path = sandbox.rootURL.path
         let buffer = UnsafeMutablePointer<CChar>.allocate(capacity: path.utf8.count + 1)
         _ = path.withCString { strcpy(buffer, $0) }
-        activeSandboxPath = buffer
+        activeSandboxPaths.append(buffer)
     }
 
     static func deregister() {
-        if let path = activeSandboxPath {
+        for path in activeSandboxPaths {
             path.deallocate()
-            activeSandboxPath = nil
         }
+        activeSandboxPaths = []
     }
 
     static func installSignalHandlers() {

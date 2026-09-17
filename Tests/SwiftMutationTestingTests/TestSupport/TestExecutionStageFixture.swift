@@ -18,7 +18,7 @@ func makeTestExecutionFixture(
     )
     let context = TestExecutionContext(
         artifact: makeBuildArtifact(in: dir),
-        sandbox: Sandbox(rootURL: dir),
+        sandboxes: [Sandbox(rootURL: dir)],
         pool: pool,
         configuration: makeRunnerConfiguration()
     )
@@ -40,8 +40,11 @@ func makeTestExecutionSPMFixture(
     )
     let config = makeRunnerConfiguration(projectType: .spm)
     let context = TestExecutionContext(
-        artifact: BuildArtifact(derivedDataPath: dir.path, xctestrunURL: nil, plist: nil),
-        sandbox: Sandbox(rootURL: dir),
+        artifact: BuildArtifact(
+            derivedDataPath: dir.path, xctestrunURL: nil, plist: nil,
+            testBundlePaths: [".build/debug/MyLibTests.xctest"]
+        ),
+        sandboxes: [Sandbox(rootURL: dir)],
         pool: pool,
         configuration: config
     )

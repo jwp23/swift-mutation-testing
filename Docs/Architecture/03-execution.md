@@ -65,7 +65,7 @@ Runs a single build for all schematizable mutants.
 
 **Xcode path:** `xcodebuild build-for-testing` → find `.xctestrun` → parse plist → `BuildArtifact`
 
-**SPM path:** `swift build --build-tests` → `BuildArtifact` (no `.xctestrun` needed)
+**SPM path:** `swift build --build-tests` → locate the built `.xctest` bundles → `BuildArtifact` (no `.xctestrun` needed)
 
 ```mermaid
 flowchart TD
@@ -100,7 +100,7 @@ flowchart TD
 
 ## TestExecutionStage
 
-Runs `xcodebuild test-without-building` for each mutant in parallel via `withThrowingTaskGroup`.
+Runs each mutant's tests in parallel via `withThrowingTaskGroup` — `xcodebuild test-without-building` for Xcode, the built `.xctest` bundles for SPM.
 
 ```mermaid
 flowchart TD
@@ -120,6 +120,10 @@ flowchart TD
 5. Release the simulator slot
 6. Parse the result via `ResultParser`
 7. Store status in `CacheStore`
+
+**Per-mutant execution (SPM):** steps 2–5 are replaced by running each built `.xctest` bundle with `xcrun xctest` from the worker's own sandbox, with `__SWIFT_MUTATION_TESTING_ACTIVE` set to the mutant ID and only what is left of the mutant's timeout. Bundles run in turn until one fails, and the result is parsed by `SPMResultParser`. A configured
+test target selects the bundle by name and any remaining `Class/method` component is passed on as
+an `-XCTest` selection — see [USAGE](../USAGE.MD#limiting-tests-to-a-target). No simulator slot is acquired — SPM tests run on the host, and one sandbox per worker is what keeps concurrent mutants out of each other's build directory.
 
 **Dynamic concurrency:** the task group seeds N tasks initially, then adds one new task for each completed task, maintaining exactly N active tasks at all times.
 

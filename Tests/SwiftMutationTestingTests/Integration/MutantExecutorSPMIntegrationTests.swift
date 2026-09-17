@@ -29,6 +29,29 @@ struct MutantExecutorSPMIntegrationTests {
         #expect(killedIDs == Set(["m1", "m2", "m4"]))
     }
 
+    @Test("Given SPM fixture run by two workers, when executed, then results match the single worker run")
+    func spmFixtureResultsMatchWithConcurrentWorkers() async throws {
+        let fixtureURL = calcLibraryURL()
+        let configuration = makeConfiguration(fixtureURL: fixtureURL, concurrency: 2)
+        let input = makeInput(fixtureURL: fixtureURL, concurrency: 2)
+
+        let results = try await MutantExecutor(
+            configuration: configuration,
+            launcher: SPMProcessLauncher()
+        ).execute(input)
+
+        let killed = results.filter {
+            if case .killed = $0.status { return true }
+            return false
+        }
+        let survived = results.filter { $0.status == .survived }
+        let killedIDs = Set(killed.map { $0.descriptor.id })
+
+        #expect(killed.count == 3)
+        #expect(survived.count == 3)
+        #expect(killedIDs == Set(["m1", "m2", "m4"]))
+    }
+
     @Test("Given SPM fixture, when executed, then original source files are not modified")
     func spmFixtureSourceFilesNotModified() async throws {
         let fixtureURL = calcLibraryURL()
@@ -58,21 +81,21 @@ private func calcLibraryURL() -> URL {
         .appending(path: "Fixtures/CalcLibrary")
 }
 
-private func makeConfiguration(fixtureURL: URL) -> RunnerConfiguration {
+private func makeConfiguration(fixtureURL: URL, concurrency: Int = 1) -> RunnerConfiguration {
     RunnerConfiguration(
         projectPath: fixtureURL.path,
-        build: .init(projectType: .spm, timeout: 60.0, concurrency: 1, noCache: true),
+        build: .init(projectType: .spm, timeout: 60.0, concurrency: concurrency, noCache: true),
         reporting: .init(quiet: true),
         filter: .init(excludePatterns: [], operators: [])
     )
 }
 
-private func makeInput(fixtureURL: URL) -> RunnerInput {
+private func makeInput(fixtureURL: URL, concurrency: Int = 1) -> RunnerInput {
     RunnerInput(
         projectPath: fixtureURL.path,
         projectType: .spm,
         timeout: 60.0,
-        concurrency: 1,
+        concurrency: concurrency,
         noCache: true,
         schematizedFiles: makeSchematizedFiles(fixtureURL: fixtureURL),
         supportFileContent: activatingSupportFileContent,

@@ -15,6 +15,8 @@ actor SPMDoubleFailMock: ProcessLaunching {
     func launchCapturing(
         _ request: ProcessRequest
     ) async throws -> (exitCode: Int32, output: String) {
+        writeMockedTestBundle(for: request)
+
         guard request.arguments.first == "build" else { return (0, "") }
         buildCallCount += 1
 

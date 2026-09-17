@@ -1,6 +1,9 @@
 import Foundation
 
 struct BuildStage: Sendable {
+    /// Directory SwiftPM links its debug products into, relative to the package root.
+    static let spmProductsDirectory = ".build/debug"
+
     let launcher: any ProcessLaunching
 
     func build(
@@ -54,7 +57,8 @@ struct BuildStage: Sendable {
         return BuildArtifact(
             derivedDataPath: derivedDataURL.path,
             xctestrunURL: xctestrunURL,
-            plist: plist
+            plist: plist,
+            testBundlePaths: []
         )
     }
 
@@ -77,11 +81,36 @@ struct BuildStage: Sendable {
 
         guard exitCode == 0 else { throw BuildError.compilationFailed(output: buildOutput) }
 
+        let testBundlePaths = findTestBundlePaths(in: sandbox)
+
+        guard !testBundlePaths.isEmpty else { throw BuildError.testBundleNotFound }
+
         return BuildArtifact(
             derivedDataPath: sandbox.rootURL.appendingPathComponent(".build").path,
             xctestrunURL: nil,
-            plist: nil
+            plist: nil,
+            testBundlePaths: testBundlePaths
         )
+    }
+
+    /// SwiftPM links its products directory to a per-triple one, and enumeration does not follow
+    /// that symlink, so the search resolves it first. The paths returned still go through the
+    /// symlink, which a replicated sandbox carries along with the directory it points at.
+    private func findTestBundlePaths(in sandbox: Sandbox) -> [String] {
+        let productsURL = sandbox.rootURL
+            .appendingPathComponent(Self.spmProductsDirectory)
+            .resolvingSymlinksInPath()
+        let items =
+            (try? FileManager.default.contentsOfDirectory(
+                at: productsURL,
+                includingPropertiesForKeys: nil
+            )) ?? []
+
+        return
+            items
+            .filter { $0.pathExtension == "xctest" }
+            .map { "\(Self.spmProductsDirectory)/\($0.lastPathComponent)" }
+            .sorted()
     }
 
     private func findXcworkspace(in directory: URL) -> URL? {

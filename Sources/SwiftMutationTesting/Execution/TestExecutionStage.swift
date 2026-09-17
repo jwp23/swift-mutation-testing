@@ -3,28 +3,43 @@ import Foundation
 struct TestExecutionStage: Sendable {
     let deps: ExecutionDeps
 
+    /// Bundles a mutant's tests run in, and the XCTest selection applied inside them. A configured
+    /// test target names the bundle with its first path component; anything after that is an
+    /// XCTest selector (`Class` or `Class/method`). A target naming no bundle — what a toolchain
+    /// that merges every test target into one bundle produces — cannot be scoped to at all, and
+    /// fails the run rather than silently widening it to every bundle.
+    private struct BundleSelection {
+        let paths: [String]
+        let xctestSelection: String?
+        let matchedTestTarget: Bool
+    }
+
     func execute(
         mutants: [MutantDescriptor],
         in context: TestExecutionContext
     ) async throws -> [ExecutionResult] {
         var results: [ExecutionResult] = []
-        let concurrency = context.configuration.build.concurrency
+        let concurrency = effectiveConcurrency(in: context)
 
-        try await withThrowingTaskGroup(of: ExecutionResult.self) { group in
-            var activeTasks = 0
+        try validateTestTargetScope(in: context)
+
+        try await withThrowingTaskGroup(of: (worker: Int, result: ExecutionResult).self) { group in
+            var workers = 0
             var iterator = mutants.makeIterator()
 
-            while activeTasks < concurrency, let mutant = iterator.next() {
+            while workers < concurrency, let mutant = iterator.next() {
                 let key = MutantCacheKey.make(for: mutant)
-                group.addTask { try await self.run(mutant: mutant, key: key, in: context) }
-                activeTasks += 1
+                let worker = workers
+                group.addTask { (worker, try await self.run(mutant: mutant, key: key, worker: worker, in: context)) }
+                workers += 1
             }
 
-            for try await result in group {
-                results.append(result)
+            for try await finished in group {
+                results.append(finished.result)
                 if let next = iterator.next() {
                     let key = MutantCacheKey.make(for: next)
-                    group.addTask { try await self.run(mutant: next, key: key, in: context) }
+                    let worker = finished.worker
+                    group.addTask { (worker, try await self.run(mutant: next, key: key, worker: worker, in: context)) }
                 }
             }
         }
@@ -32,9 +47,37 @@ struct TestExecutionStage: Sendable {
         return results
     }
 
+    /// Workers must never share a sandbox: `sandbox(forWorker:)` wraps, so running more workers
+    /// than there are sandboxes would put two live mutants in one working directory and one build
+    /// directory. SPM mutants therefore run at most one worker per sandbox — which also keeps the
+    /// per-file fallback path, with its single sandbox, serialized. Xcode mutants share the one
+    /// build sandbox by design, selecting their tests through a per-mutant xctestrun file.
+    private func effectiveConcurrency(in context: TestExecutionContext) -> Int {
+        let configured = context.configuration.build.concurrency
+
+        guard context.artifact.plist == nil else { return configured }
+
+        return max(1, min(configured, context.sandboxes.count))
+    }
+
+    /// A configured `--test-target` that names no built bundle cannot be scoped to at all — the
+    /// toolchain merged every test target into one bundle, so there is nothing narrower to select
+    /// within it. Failing fast here, before any mutant runs, is safer than silently running every
+    /// bundle: broader execution can change a mutant's kill/survive verdict, not just its runtime.
+    private func validateTestTargetScope(in context: TestExecutionContext) throws {
+        guard
+            context.artifact.plist == nil,
+            let testTarget = context.configuration.build.testTarget,
+            !bundleSelection(in: context).matchedTestTarget
+        else { return }
+
+        throw BuildError.testTargetUnscopable(testTarget: testTarget)
+    }
+
     private func run(
         mutant: MutantDescriptor,
         key: MutantCacheKey,
+        worker: Int,
         in context: TestExecutionContext
     ) async throws -> ExecutionResult {
         if !context.configuration.build.noCache, let cached = await deps.cacheStore.result(for: key) {
@@ -49,14 +92,14 @@ struct TestExecutionStage: Sendable {
         }
 
         guard let plist = context.artifact.plist else {
-            return try await runSPM(mutant: mutant, key: key, in: context)
+            return try await runSPM(mutant: mutant, key: key, worker: worker, in: context)
         }
 
         let plistData = plist.activating(mutant.id)
         let slot = try await context.pool.acquire()
         let launched: TestLaunchResult
         do {
-            launched = try await launch(plistData: plistData, slot: slot, in: context)
+            launched = try await launch(plistData: plistData, slot: slot, worker: worker, in: context)
         } catch {
             await context.pool.release(slot)
             throw error
@@ -75,22 +118,16 @@ struct TestExecutionStage: Sendable {
         return await recordResult(mutant: mutant, key: key, outcome: outcome, duration: launched.duration)
     }
 
+    /// SPM mutants run the prebuilt test bundles straight from the worker's own sandbox, so they
+    /// need no simulator slot — the pool exists for destinations that boot a simulator.
     private func runSPM(
         mutant: MutantDescriptor,
         key: MutantCacheKey,
+        worker: Int,
         in context: TestExecutionContext
     ) async throws -> ExecutionResult {
-        let slot = try await context.pool.acquire()
-        let launched: TestLaunchResult
-        do {
-            launched = try await launchSPM(mutant: mutant, in: context)
-        } catch {
-            await context.pool.release(slot)
-            throw error
-        }
-
+        let launched = try await launchSPM(mutant: mutant, worker: worker, in: context)
         let outcome = SPMResultParser().parse(exitCode: launched.exitCode, output: launched.output)
-        await context.pool.release(slot)
         return await recordResult(mutant: mutant, key: key, outcome: outcome, duration: launched.duration)
     }
 
@@ -122,48 +159,105 @@ struct TestExecutionStage: Sendable {
         return deps.killerTestFileResolver.resolve(testName: testName)
     }
 
+    /// Runs the mutant's test bundles in the worker's sandbox, selecting the mutant through the
+    /// environment. Bundles run in turn until one reports a failure — a mutant a bundle already
+    /// killed cannot be killed harder by the next one — and each run only gets what is left of
+    /// the mutant's timeout.
     private func launchSPM(
         mutant: MutantDescriptor,
+        worker: Int,
         in context: TestExecutionContext
     ) async throws -> TestLaunchResult {
-        var arguments = ["test", "--skip-build"]
+        let selection = bundleSelection(in: context)
+        let bundlePaths = selection.paths
 
-        if let testTarget = context.configuration.build.testTarget {
-            arguments += ["--filter", testTarget]
+        guard !bundlePaths.isEmpty else { throw BuildError.testBundleNotFound }
+
+        let sandbox = context.sandbox(forWorker: worker)
+        let timeout = context.configuration.build.timeout
+        let start = Date()
+        var output = ""
+        var exitCode: Int32 = 0
+
+        for bundlePath in bundlePaths {
+            let remaining = timeout - Date().timeIntervalSince(start)
+
+            guard remaining > 0 else {
+                return TestLaunchResult(
+                    exitCode: SPMResultParser.timeoutExitCode,
+                    output: output,
+                    xcresultPath: "",
+                    duration: Date().timeIntervalSince(start)
+                )
+            }
+
+            var arguments = ["xctest"]
+
+            if let xctestSelection = selection.xctestSelection {
+                arguments += ["-XCTest", xctestSelection]
+            }
+
+            arguments.append(sandbox.rootURL.appendingPathComponent(bundlePath).path)
+
+            let captured = try await deps.launcher.launchCapturing(
+                ProcessRequest(
+                    executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
+                    arguments: arguments,
+                    environment: nil,
+                    additionalEnvironment: [
+                        "__SWIFT_MUTATION_TESTING_ACTIVE": mutant.id
+                    ],
+                    workingDirectoryURL: sandbox.rootURL,
+                    timeout: remaining
+                )
+            )
+
+            output += captured.output
+            exitCode = captured.exitCode
+
+            if exitCode != 0 { break }
         }
 
-        let start = Date()
-        let captured = try await deps.launcher.launchCapturing(
-            ProcessRequest(
-                executableURL: URL(fileURLWithPath: "/usr/bin/swift"),
-                arguments: arguments,
-                environment: nil,
-                additionalEnvironment: [
-                    "__SWIFT_MUTATION_TESTING_ACTIVE": mutant.id
-                ],
-                workingDirectoryURL: context.sandbox.rootURL,
-                timeout: context.configuration.build.timeout
-            )
-        )
-
         return TestLaunchResult(
-            exitCode: captured.exitCode,
-            output: captured.output,
+            exitCode: exitCode,
+            output: output,
             xcresultPath: "",
             duration: Date().timeIntervalSince(start)
+        )
+    }
+
+    private func bundleSelection(in context: TestExecutionContext) -> BundleSelection {
+        let allPaths = context.artifact.testBundlePaths
+
+        guard let testTarget = context.configuration.build.testTarget else {
+            return BundleSelection(paths: allPaths, xctestSelection: nil, matchedTestTarget: true)
+        }
+
+        var components = testTarget.components(separatedBy: "/")
+        let targetName = components.removeFirst()
+        let matching = allPaths.filter {
+            URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent == targetName
+        }
+
+        return BundleSelection(
+            paths: matching.isEmpty ? allPaths : matching,
+            xctestSelection: components.isEmpty ? nil : components.joined(separator: "/"),
+            matchedTestTarget: !matching.isEmpty
         )
     }
 
     private func launch(
         plistData: Data,
         slot: SimulatorSlot,
+        worker: Int,
         in context: TestExecutionContext
     ) async throws -> TestLaunchResult {
+        let sandbox = context.sandbox(forWorker: worker)
         let baseURL =
             context.artifact.xctestrunURL?.deletingLastPathComponent()
-            ?? context.sandbox.rootURL
+            ?? sandbox.rootURL
         let xctestrunURL = baseURL.appendingPathComponent("\(UUID().uuidString).xctestrun")
-        let xcresultPath = context.sandbox.rootURL
+        let xcresultPath = sandbox.rootURL
             .appendingPathComponent("\(UUID().uuidString).xcresult").path
 
         defer { try? FileManager.default.removeItem(at: xctestrunURL) }
@@ -189,7 +283,7 @@ struct TestExecutionStage: Sendable {
                 arguments: arguments,
                 environment: nil,
                 additionalEnvironment: [:],
-                workingDirectoryURL: context.sandbox.rootURL,
+                workingDirectoryURL: sandbox.rootURL,
                 timeout: context.configuration.build.timeout
             )
         )
