@@ -100,7 +100,7 @@ flowchart LR
 | `SandboxFactory` | project path + schematized files | `Sandbox` |
 | `BuildStage` | `Sandbox` | `BuildArtifact` |
 | `TestExecutionStage` | `BuildArtifact` + mutants | `[ExecutionResult]` |
-| `FallbackExecutor` | `RunnerInput` + `SimulatorPool` | `[ExecutionResult]` |
+| `FallbackExecutor` | `RunnerInput` + mutants to test + `SimulatorPool` | `[ExecutionResult]` |
 | `IncompatibleMutantExecutor` | incompatible mutants | `[ExecutionResult]` |
 | `TestResultResolver` | `TestLaunchResult` + `ProjectType` | `TestRunOutcome` |
 
