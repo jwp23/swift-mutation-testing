@@ -42,7 +42,28 @@ struct SourceFileExclusion: Sendable {
     /// Whether any directory the path passes through is a test target by convention: named
     /// `Tests`, or a project's own name followed by it, such as `AppTests` or `ProjectTests`.
     /// `/Tests/` alone would miss every project that names its test target after itself.
+    ///
+    /// A component ending in `Tests` doesn't count if an earlier (closer-to-root) component is
+    /// literally `Sources` — that marks a source-code feature directory that happens to end in
+    /// "Tests" (`Sources/ABTests/`, `Sources/Analytics/ExperimentTests/`), not a test target. A
+    /// component that is exactly `Tests` always counts regardless of a `Sources` ancestor,
+    /// though that combination shouldn't arise in practice.
+    ///
+    /// This is a path-based heuristic with no real target list to check against (this codebase
+    /// has no Package.swift/`.testTarget` parser). A project checked out under a directory that
+    /// happens to be named `Sources` for unrelated reasons could still be misclassified — an
+    /// accepted tradeoff.
     private func isInTestDirectory(_ path: String) -> Bool {
-        path.split(separator: "/").dropLast().contains { $0.hasSuffix("Tests") }
+        let components = path.split(separator: "/").dropLast()
+        var sawSources = false
+        for component in components {
+            if component == "Tests" { return true }
+            if component == "Sources" {
+                sawSources = true
+                continue
+            }
+            if component.hasSuffix("Tests") && !sawSources { return true }
+        }
+        return false
     }
 }

@@ -31,7 +31,7 @@ Collects Swift source files under the configured sources path.
 | Input | `DiscoveryInput` — project path, sources path, exclude patterns |
 | Output | `[SourceFile]` — path + raw text content |
 
-Traverses the directory tree recursively. Excludes files matching any `--exclude` glob pattern and files located under paths that contain `Tests`, `Specs`, `.build`, or similar test-only indicators. Each discovered file is read into a `SourceFile` value.
+Traverses the directory tree recursively. Excludes files matching any `--exclude` glob pattern, files under `.build` or similar build-output directories, and files under an exact `Tests` directory or a directory component that ends in `Tests` (e.g. `AppTests/`). A non-exact `*Tests` component doesn't count when an earlier, closer-to-root component is literally `Sources`, so a source feature directory like `Sources/ABTests/` isn't a test target. Each discovered file is read into a `SourceFile` value.
 
 ### ParsingStage
 
