@@ -47,6 +47,25 @@ struct BuildErrorTests {
         #expect(lhs == rhs)
     }
 
+    @Test(
+        "Given testTargetIncompatibleWithSwiftTesting, when errorDescription accessed, then names the target and recommends a bundle-level target"
+    )
+    func testTargetIncompatibleWithSwiftTesting() {
+        let error = BuildError.testTargetIncompatibleWithSwiftTesting(testTarget: "BTests/SomeSuite")
+        #expect(error.errorDescription?.contains("BTests/SomeSuite") == true)
+        #expect(error.errorDescription?.contains("Swift Testing") == true)
+        #expect(error.errorDescription?.contains("--target") == true)
+    }
+
+    @Test(
+        "Given two testTargetIncompatibleWithSwiftTesting errors with different targets, when compared, then they are equal"
+    )
+    func testTargetIncompatibleWithSwiftTestingEqualityIgnoresTarget() {
+        let lhs = BuildError.testTargetIncompatibleWithSwiftTesting(testTarget: "A")
+        let rhs = BuildError.testTargetIncompatibleWithSwiftTesting(testTarget: "B")
+        #expect(lhs == rhs)
+    }
+
     @Test("Given testBundleNotFound and xctestrunNotFound, when compared, then they are not equal")
     func testBundleNotFoundIsNotXctestrunNotFound() {
         #expect(BuildError.testBundleNotFound != BuildError.xctestrunNotFound)

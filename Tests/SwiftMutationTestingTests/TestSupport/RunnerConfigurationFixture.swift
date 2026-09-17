@@ -4,6 +4,7 @@ func makeRunnerConfiguration(
     projectPath: String = "/tmp",
     projectType: ProjectType = .xcode(scheme: "MyScheme", destination: "platform=macOS"),
     testTarget: String? = nil,
+    testingFramework: TestingFramework = .swiftTesting,
     timeout: Double = 60,
     concurrency: Int = 1,
     noCache: Bool = false,
@@ -26,6 +27,7 @@ func makeRunnerConfiguration(
             timeout: timeout,
             concurrency: concurrency,
             noCache: noCache,
+            testingFramework: testingFramework,
             likelyKillerTests: likelyKillerTests
         ),
         reporting: .init(
