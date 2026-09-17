@@ -4,6 +4,9 @@
 USP/
 Makefile
 
+# SPM build output
+.build/
+
 # Claude Code worktrees
 .claude/worktrees/
 
