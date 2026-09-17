@@ -90,6 +90,79 @@ struct SandboxCleanerTests {
         #expect(FileManager.default.fileExists(atPath: regularFile.path))
     }
 
+    @Test("Given xmr directory owned by a live process, when removeOrphaned called, then it is preserved")
+    func removeOrphanedPreservesLiveOwnerDirectory() throws {
+        let baseDir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(baseDir) }
+
+        let liveProcess = Process()
+        liveProcess.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        liveProcess.arguments = ["30"]
+        try liveProcess.run()
+        defer {
+            liveProcess.terminate()
+            liveProcess.waitUntilExit()
+        }
+
+        let owned = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: owned, withIntermediateDirectories: true)
+        try String(liveProcess.processIdentifier).write(
+            to: owned.appendingPathComponent(SandboxFactory.ownerPidFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        SandboxCleaner.removeOrphaned(in: baseDir)
+
+        #expect(FileManager.default.fileExists(atPath: owned.path))
+    }
+
+    @Test("Given xmr directory owned by a dead process, when removeOrphaned called, then it is removed")
+    func removeOrphanedDeletesDeadOwnerDirectory() throws {
+        let baseDir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(baseDir) }
+
+        let deadProcess = Process()
+        deadProcess.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        deadProcess.arguments = ["0"]
+        try deadProcess.run()
+        deadProcess.waitUntilExit()
+        let deadPid = deadProcess.processIdentifier
+
+        let owned = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: owned, withIntermediateDirectories: true)
+        try String(deadPid).write(
+            to: owned.appendingPathComponent(SandboxFactory.ownerPidFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        SandboxCleaner.removeOrphaned(in: baseDir)
+
+        #expect(!FileManager.default.fileExists(atPath: owned.path))
+    }
+
+    @Test(
+        "Given xmr directory with a nonpositive owner-pid value, when removeOrphaned called, then it is removed",
+        arguments: ["0", "-1"]
+    )
+    func removeOrphanedDeletesDirectoryWithNonpositiveOwnerPid(pidValue: String) throws {
+        let baseDir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(baseDir) }
+
+        let owned = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: owned, withIntermediateDirectories: true)
+        try pidValue.write(
+            to: owned.appendingPathComponent(SandboxFactory.ownerPidFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        SandboxCleaner.removeOrphaned(in: baseDir)
+
+        #expect(!FileManager.default.fileExists(atPath: owned.path))
+    }
+
     @Test("Given no active sandbox, when deregister called, then no error occurs")
     func deregisterWithoutRegisterIsNoOp() {
         SandboxCleaner.deregister()
