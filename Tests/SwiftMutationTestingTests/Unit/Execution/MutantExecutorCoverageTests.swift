@@ -75,6 +75,52 @@ struct MutantExecutorCoverageTests {
         #expect(results.count == 1)
     }
 
+    @Test(
+        "Given a build that fails then a retry that rebuilds, when built, then both builds are given the build timeout, not the per-mutant timeout"
+    )
+    func buildAndRetryUseTheBuildTimeoutNotThePerMutantTimeout() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let fooFile = dir.appendingPathComponent("Foo.swift")
+        try "let x = true".write(to: fooFile, atomically: true, encoding: .utf8)
+
+        let launcher = SPMErrorWithoutLineNumberMock()
+        let executor = MutantExecutor(
+            configuration: makeRunnerConfiguration(
+                projectPath: dir.path, projectType: .spm, timeout: 5, buildTimeout: 900
+            ),
+            launcher: launcher
+        )
+        let mutant = makeMutantDescriptor(
+            id: "m0",
+            filePath: fooFile.path,
+            originalText: "true",
+            mutatedText: "false",
+            operatorIdentifier: "BooleanLiteralReplacement",
+            replacementKind: .booleanLiteral,
+            description: "true → false",
+            isSchematizable: true,
+            mutatedSourceContent: "let x = false"
+        )
+        let input = makeRunnerInput(
+            projectPath: dir.path,
+            projectType: .spm,
+            schematizedFiles: [SchematizedFile(originalPath: fooFile.path, schematizedContent: "let x = false")],
+            mutants: [mutant]
+        )
+
+        _ = try await executor.execute(input)
+
+        // The first two `swift build` calls are the schema build's own attempts: the initial
+        // build in `buildArtifact`, which fails, then the rebuild `retryExcludingErrors` issues
+        // after excluding the offending file's mutants. A mutant excluded this way is then routed
+        // to its own per-mutant sandbox build outside `MutantExecutor`, which is not this test's
+        // concern.
+        let buildTimeouts = await launcher.buildTimeouts
+        #expect(Array(buildTimeouts.prefix(2)) == [900, 900])
+    }
+
     @Test("Given single case before default in schema, when that case excluded, then default line is preserved")
     func singleCaseExclusionPreservesDefault() async throws {
         let dir = try FileHelpers.makeTemporaryDirectory()

@@ -159,6 +159,7 @@ mutators:
 | `destination` | String | — | `xcodebuild` destination specifier (required for Xcode projects, omit for SPM) |
 | `test-target` | String | — | Limit test execution to this target (Xcode: `-only-testing`; SPM: see [Limiting tests to a target](#limiting-tests-to-a-target)) |
 | `timeout` | Number | `120` (Xcode) / `30` (SPM) | Least time a mutant's tests are given, in seconds (see [Per-mutant timeouts](#per-mutant-timeouts)) |
+| `build-timeout` | Number | `600` | Bounds the schematized build only, in seconds — not test execution |
 | `concurrency` | Number | `max(1, CPUs − 1)` | Number of parallel test workers |
 | `no-cache` | Boolean | `false` | Disable result caching |
 | `output` | String | — | Path for Stryker-compatible JSON report |
@@ -230,6 +231,7 @@ swift-mutation-testing [project-path] [options]
 | `--destination <destination>` | `xcodebuild` destination specifier (required for Xcode, omit for SPM) |
 | `--target <test-target>` | Limit test execution to this target (see [Limiting tests to a target](#limiting-tests-to-a-target)) |
 | `--timeout <seconds>` | Least time a mutant's tests are given (default: 120 Xcode, 30 SPM) |
+| `--build-timeout <seconds>` | Bounds the schematized build only, not test execution (default: 600) |
 | `--concurrency <n>` | Parallel workers (default: CPUs − 1) |
 | `--no-cache` | Disable result caching |
 | `--output <path>` | Write Stryker-compatible JSON report |

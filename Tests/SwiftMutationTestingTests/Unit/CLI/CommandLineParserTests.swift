@@ -90,6 +90,25 @@ struct CommandLineParserTests {
         #expect(result.build.concurrency == 3)
     }
 
+    @Test("Given --build-timeout flag, when parsed, then buildTimeout is set separately from timeout")
+    func parsesBuildTimeoutFlag() throws {
+        let result = try parser.parse([
+            "run", "--scheme", "App", "--destination", "d",
+            "--timeout", "30",
+            "--build-timeout", "900",
+        ])
+
+        #expect(result.build.timeout == 30)
+        #expect(result.build.buildTimeout == 900)
+    }
+
+    @Test("Given a non-numeric build-timeout value, when parsed, then throws UsageError")
+    func throwsForInvalidBuildTimeout() {
+        #expect(throws: UsageError.self) {
+            try parser.parse(["run", "--build-timeout", "abc"])
+        }
+    }
+
     @Test("Given init command without path, when parsed, then showInit is true and projectPath defaults to dot")
     func parsesInitWithDefaultPath() throws {
         let result = try parser.parse(["init"])

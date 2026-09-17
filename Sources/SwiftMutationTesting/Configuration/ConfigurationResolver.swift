@@ -20,6 +20,7 @@ struct ConfigurationResolver: Sendable {
 
         let testingFramework = try resolvedTestingFramework(cli: cliArguments, fileValues: fileValues)
         let timeout = resolvedTimeout(cli: cliArguments, fileValues: fileValues, projectType: projectType)
+        let buildTimeout = resolvedBuildTimeout(cli: cliArguments, fileValues: fileValues)
 
         let effectiveConcurrency: Int
         if case .xcode = projectType, testingFramework == .xctest {
@@ -34,6 +35,7 @@ struct ConfigurationResolver: Sendable {
                 projectType: projectType,
                 testTarget: cliArguments.build.testTarget ?? fileValues["test-target"],
                 timeout: timeout,
+                buildTimeout: buildTimeout,
                 concurrency: effectiveConcurrency,
                 noCache: cliArguments.build.noCache || fileValues["no-cache"]?.lowercased() == "true",
                 testingFramework: testingFramework,
@@ -98,6 +100,15 @@ struct ConfigurationResolver: Sendable {
         case .xcode: RunnerConfiguration.defaultXcodeTimeout
         case .spm: RunnerConfiguration.defaultSPMTimeout
         }
+    }
+
+    private func resolvedBuildTimeout(cli: ParsedArguments, fileValues: [String: String]) -> Double {
+        if let buildTimeout = cli.build.buildTimeout { return buildTimeout }
+        if let buildTimeout = fileValues["build-timeout"].flatMap(Double.init), buildTimeout.isFinite, buildTimeout > 0 {
+            return buildTimeout
+        }
+
+        return RunnerConfiguration.defaultBuildTimeout
     }
 
     private func resolvedConcurrency(cli: ParsedArguments, fileValues: [String: String]) -> Int {
