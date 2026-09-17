@@ -5,6 +5,10 @@ import Foundation
 actor SPMErrorWithoutLineNumberMock: ProcessLaunching {
     private var buildCallCount = 0
 
+    /// The timeout each `swift build` request was given, in call order — the initial build and
+    /// every retry after it.
+    private(set) var buildTimeouts: [Double] = []
+
     func launch(
         executableURL: URL,
         arguments: [String],
@@ -19,6 +23,7 @@ actor SPMErrorWithoutLineNumberMock: ProcessLaunching {
 
         guard request.arguments.first == "build" else { return (0, "") }
         buildCallCount += 1
+        buildTimeouts.append(request.timeout)
         if buildCallCount == 1 {
             let fooPath = request.workingDirectoryURL.appendingPathComponent("Foo.swift").path
             let canonical = fooPath.withCString { ptr in

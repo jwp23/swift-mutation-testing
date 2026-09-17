@@ -2,7 +2,7 @@ struct CommandLineParser: Sendable {
 
     private static let recognizedFlags: Set<String> = [
         "-h", "--help", "--version",
-        "--scheme", "--destination", "--target", "--timeout", "--concurrency", "--no-cache",
+        "--scheme", "--destination", "--target", "--timeout", "--build-timeout", "--concurrency", "--no-cache",
         "--testing-framework", "--output", "--html-output", "--sonar-output", "--quiet",
         "--sources-path", "--exclude", "--operator", "--disable-mutator", "--scope-lines",
         "--since", "--baseline-report",
@@ -13,6 +13,7 @@ struct CommandLineParser: Sendable {
         var destination: String?
         var testTarget: String?
         var timeout: Double?
+        var buildTimeout: Double?
         var concurrency: Int?
         var noCache = false
         var testingFramework: String?
@@ -78,6 +79,7 @@ struct CommandLineParser: Sendable {
                 destination: flags.destination,
                 testTarget: flags.testTarget,
                 timeout: flags.timeout,
+                buildTimeout: flags.buildTimeout,
                 concurrency: flags.concurrency,
                 noCache: flags.noCache,
                 testingFramework: flags.testingFramework
@@ -131,6 +133,9 @@ struct CommandLineParser: Sendable {
 
         case "--timeout":
             values.timeout = try nextDouble(for: flag, at: &index, in: arguments)
+
+        case "--build-timeout":
+            values.buildTimeout = try nextDouble(for: flag, at: &index, in: arguments)
 
         case "--concurrency":
             values.concurrency = try nextInt(for: flag, at: &index, in: arguments)

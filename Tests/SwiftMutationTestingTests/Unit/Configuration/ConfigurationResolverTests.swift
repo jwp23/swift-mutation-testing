@@ -135,6 +135,49 @@ struct ConfigurationResolverTests {
         #expect(result.build.timeout == RunnerConfiguration.defaultSPMTimeout)
     }
 
+    @Test("Given no build timeout in CLI or file, when resolved, then default build timeout is applied")
+    func appliesDefaultBuildTimeout() throws {
+        let result = try resolver.resolve(
+            cliArguments: ParsedArguments(build: .init(scheme: "App", destination: "d")),
+            fileValues: [:]
+        )
+
+        #expect(result.build.buildTimeout == RunnerConfiguration.defaultBuildTimeout)
+    }
+
+    @Test("Given build timeout only in file, when resolved, then configuration uses file build timeout")
+    func fileBuildTimeoutUsedWhenCLIOmits() throws {
+        let result = try resolver.resolve(
+            cliArguments: ParsedArguments(build: .init(scheme: "App", destination: "d")),
+            fileValues: ["build-timeout": "300"]
+        )
+
+        #expect(result.build.buildTimeout == 300)
+    }
+
+    @Test("Given build timeout in both CLI and file, when resolved, then CLI build timeout takes priority")
+    func cliBuildTimeoutOverridesFile() throws {
+        let result = try resolver.resolve(
+            cliArguments: ParsedArguments(build: .init(scheme: "App", destination: "d", buildTimeout: 900)),
+            fileValues: ["build-timeout": "300"]
+        )
+
+        #expect(result.build.buildTimeout == 900)
+    }
+
+    @Test(
+        "Given a non-positive or non-finite file build timeout, when resolved, then the default build timeout is applied",
+        arguments: ["0", "-5", "nan", "inf"]
+    )
+    func invalidFileBuildTimeoutFallsBackToDefault(rawValue: String) throws {
+        let result = try resolver.resolve(
+            cliArguments: ParsedArguments(build: .init(scheme: "App", destination: "d")),
+            fileValues: ["build-timeout": rawValue]
+        )
+
+        #expect(result.build.buildTimeout == RunnerConfiguration.defaultBuildTimeout)
+    }
+
     @Test("Given no concurrency in CLI or file, when resolved, then default concurrency is applied")
     func appliesDefaultConcurrency() throws {
         let result = try resolver.resolve(
