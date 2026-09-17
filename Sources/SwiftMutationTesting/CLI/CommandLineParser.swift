@@ -1,4 +1,13 @@
 struct CommandLineParser: Sendable {
+
+    private static let recognizedFlags: Set<String> = [
+        "-h", "--help", "--version",
+        "--scheme", "--destination", "--target", "--timeout", "--concurrency", "--no-cache",
+        "--testing-framework", "--output", "--html-output", "--sonar-output", "--quiet",
+        "--sources-path", "--exclude", "--operator", "--disable-mutator", "--scope-lines",
+        "--since", "--baseline-report",
+    ]
+
     private struct FlagValues {
         var scheme: String?
         var destination: String?
@@ -15,6 +24,9 @@ struct CommandLineParser: Sendable {
         var excludePatterns: [String] = []
         var operators: [String] = []
         var disabledMutators: [String] = []
+        var scopeLines: [String] = []
+        var since: String?
+        var baselineReport: String?
     }
 
     func parse(_ arguments: [String]) throws -> ParsedArguments {
@@ -80,7 +92,10 @@ struct CommandLineParser: Sendable {
                 sourcesPath: flags.sourcesPath,
                 excludePatterns: flags.excludePatterns,
                 operators: flags.operators,
-                disabledMutators: flags.disabledMutators
+                disabledMutators: flags.disabledMutators,
+                scopeLines: flags.scopeLines,
+                since: flags.since,
+                baselineReport: flags.baselineReport
             )
         )
     }
@@ -150,6 +165,15 @@ struct CommandLineParser: Sendable {
         case "--disable-mutator":
             values.disabledMutators.append(try nextValue(for: flag, at: &index, in: arguments))
 
+        case "--scope-lines":
+            values.scopeLines.append(try nextValue(for: flag, at: &index, in: arguments))
+
+        case "--since":
+            values.since = try nextValue(for: flag, at: &index, in: arguments)
+
+        case "--baseline-report":
+            values.baselineReport = try nextValue(for: flag, at: &index, in: arguments)
+
         default:
             throw UsageError(message: "unknown option '\(flag)'")
         }
@@ -157,7 +181,7 @@ struct CommandLineParser: Sendable {
 
     private func nextValue(for flag: String, at index: inout Int, in arguments: [String]) throws -> String {
         let next = index + 1
-        guard next < arguments.count else {
+        guard next < arguments.count, !Self.recognizedFlags.contains(arguments[next]) else {
             throw UsageError(message: "\(flag) requires a value")
         }
         index = next

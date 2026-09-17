@@ -1,4 +1,4 @@
-struct MutationReportMutant: Sendable, Encodable {
+struct MutationReportMutant: Sendable, Codable {
     let id: String
     let mutatorName: String
     let originalText: String

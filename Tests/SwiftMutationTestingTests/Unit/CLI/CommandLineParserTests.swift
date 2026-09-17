@@ -229,4 +229,61 @@ struct CommandLineParserTests {
 
         #expect(result.filter.disabledMutators == ["RemoveSideEffects", "SwapTernary"])
     }
+
+    @Test("Given repeated --scope-lines flags, when parsed, then all line sets are collected")
+    func scopeLinesAreCollected() throws {
+        let result = try parser.parse([
+            "run",
+            "--scheme", "App",
+            "--destination", "d",
+            "--scope-lines", "Sources/Foo.swift:10-20",
+            "--scope-lines", "Sources/Bar.swift:3-3",
+        ])
+
+        #expect(result.filter.scopeLines == ["Sources/Foo.swift:10-20", "Sources/Bar.swift:3-3"])
+    }
+
+    @Test("Given --since flag, when parsed, then the reference is set")
+    func parsesSince() throws {
+        let result = try parser.parse(["run", "--scheme", "App", "--destination", "d", "--since", "origin/main"])
+
+        #expect(result.filter.since == "origin/main")
+    }
+
+    @Test("Given --baseline-report flag, when parsed, then the report path is set")
+    func parsesBaselineReport() throws {
+        let result = try parser.parse([
+            "run", "--scheme", "App", "--destination", "d", "--baseline-report", "/tmp/report.json",
+        ])
+
+        #expect(result.filter.baselineReport == "/tmp/report.json")
+    }
+
+    @Test("Given no scoping flags, when parsed, then the run is unscoped")
+    func scopingFlagsDefaultToUnscoped() throws {
+        let result = try parser.parse(["run", "--scheme", "App", "--destination", "d"])
+
+        #expect(result.filter.scopeLines.isEmpty)
+        #expect(result.filter.since == nil)
+        #expect(result.filter.baselineReport == nil)
+    }
+
+    @Test("Given --since without a value, when parsed, then it throws a usage error")
+    func sinceRequiresValue() {
+        #expect(throws: UsageError.self) { try parser.parse(["run", "--since"]) }
+    }
+
+    @Test("Given --since immediately followed by another flag, when parsed, then it throws a usage error")
+    func sinceFollowedByAnotherFlagThrows() {
+        #expect(throws: UsageError.self) { try parser.parse(["run", "--since", "--quiet"]) }
+    }
+
+    @Test("Given a scope-lines value that begins with a hyphen, when parsed, then it is accepted as the value")
+    func scopeLinesValueStartingWithHyphenIsAccepted() throws {
+        let result = try parser.parse([
+            "run", "--scheme", "App", "--destination", "d", "--scope-lines", "-Foo.swift:1-2",
+        ])
+
+        #expect(result.filter.scopeLines == ["-Foo.swift:1-2"])
+    }
 }

@@ -12,7 +12,11 @@ func makeRunnerConfiguration(
     sonarOutput: String? = nil,
     quiet: Bool = true,
     excludePatterns: [String] = [],
-    operators: [String] = []
+    operators: [String] = [],
+    scopeLines: [String] = [],
+    since: String? = nil,
+    baselineReport: String? = nil,
+    likelyKillerTests: [String: [String]] = [:]
 ) -> RunnerConfiguration {
     RunnerConfiguration(
         projectPath: projectPath,
@@ -21,7 +25,8 @@ func makeRunnerConfiguration(
             testTarget: testTarget,
             timeout: timeout,
             concurrency: concurrency,
-            noCache: noCache
+            noCache: noCache,
+            likelyKillerTests: likelyKillerTests
         ),
         reporting: .init(
             output: output,
@@ -29,6 +34,12 @@ func makeRunnerConfiguration(
             sonarOutput: sonarOutput,
             quiet: quiet
         ),
-        filter: .init(excludePatterns: excludePatterns, operators: operators)
+        filter: .init(
+            excludePatterns: excludePatterns,
+            operators: operators,
+            scopeLines: scopeLines,
+            since: since,
+            baselineReport: baselineReport
+        )
     )
 }

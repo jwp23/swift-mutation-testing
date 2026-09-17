@@ -16,13 +16,11 @@ struct LikelyKillerTestSelector: Sendable {
                 .filter(Self.declaresXCTestClass)
                 .map { URL(fileURLWithPath: $0).lastPathComponent }
         )
-        self.overrides = overrides
+        self.mapping = LikelyKillerTestMapping(overrides: overrides)
     }
 
-    /// Test files listed in the configuration for sources the naming convention does not cover,
-    /// keyed by source path suffix. Configured entries are taken at their word — a name that
-    /// matches nothing simply runs no tests, and the whole suite still decides survival.
-    let overrides: [String: [String]]
+    /// Which test files the convention and the configured overrides pair with a source file.
+    private let mapping: LikelyKillerTestMapping
 
     /// File names of the project's test files that an XCTest selection can reach, read once when
     /// the selector is built rather than per mutant.
@@ -36,28 +34,21 @@ struct LikelyKillerTestSelector: Sendable {
 
     /// XCTest selection naming the likely killers of a mutant in `sourceFilePath`, or `nil` when
     /// the source has none and only the whole suite can judge it.
+    ///
+    /// Configured entries are taken at their word — a name that matches nothing simply runs no
+    /// tests, and the whole suite still decides survival.
     func selection(forSourceFile sourceFilePath: String) -> String? {
         let testFileNames =
-            overriddenTestFileNames(for: sourceFilePath)
-            ?? conventionalTestFileNames(for: sourceFilePath)
+            mapping.overriddenTestFileNames(forSourceFile: sourceFilePath)
+            ?? reachableConventionalTestFileNames(for: sourceFilePath)
 
         guard !testFileNames.isEmpty else { return nil }
 
         return testFileNames.map(testClassName).joined(separator: ",")
     }
 
-    /// The configured entry whose key is the longest suffix of the source path, so that an
-    /// override naming a directory beats one naming only a file name.
-    private func overriddenTestFileNames(for sourceFilePath: String) -> [String]? {
-        overrides
-            .filter { sourceFilePath == $0.key || sourceFilePath.hasSuffix("/\($0.key)") }
-            .max { $0.key.count < $1.key.count }?
-            .value
-    }
-
-    private func conventionalTestFileNames(for sourceFilePath: String) -> [String] {
-        let sourceName = URL(fileURLWithPath: sourceFilePath).deletingPathExtension().lastPathComponent
-        let testFileName = "\(sourceName)Tests.swift"
+    private func reachableConventionalTestFileNames(for sourceFilePath: String) -> [String] {
+        let testFileName = mapping.conventionalTestFileName(forSourceFile: sourceFilePath)
 
         return xctestFileNames.contains(testFileName) ? [testFileName] : []
     }

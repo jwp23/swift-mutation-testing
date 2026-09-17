@@ -238,6 +238,9 @@ swift-mutation-testing [project-path] [options]
 | `--exclude <pattern>` | Exclude files matching glob pattern (repeatable) |
 | `--operator <id>` | Activate only this operator (repeatable) |
 | `--disable-mutator <id>` | Deactivate this operator (repeatable) |
+| `--scope-lines <path:start-end>` | Test only the mutants on these source lines (repeatable, see [Scoping a run to a diff](#scoping-a-run-to-a-diff)) |
+| `--since <git-ref>` | Test only the mutants the diff against this reference touches |
+| `--baseline-report <path>` | JSON report of an earlier full run, so a changed test also puts the mutants it killed back in scope |
 | `--quiet` | Suppress progress output |
 
 ### Limiting tests to a target
@@ -293,6 +296,59 @@ suite decides as before. A source with neither
 a conventional test file nor a configured entry goes straight to the whole suite. So does every
 mutant when `--target` already names a class (`--target MyLibTests/MyClass`) — that selection is
 the narrower one and it stands. Xcode projects always run the scope `--target` gives them.
+
+### Scoping a run to a diff
+
+A pull request gate does not need the whole codebase re-tested — only what the branch changed.
+`--scope-lines` limits a run to the mutants on the source lines it names, and `--since` computes
+that same line set from `git diff -U0 --relative <ref>`:
+
+```bash
+# Only the mutants on the lines this branch changed
+swift-mutation-testing --since origin/main
+```
+
+Both flags compose with the file and operator scoping above: `--exclude`, `--operator` and
+`--sources-path` still apply, and the line set narrows what is left. Files the scope does not
+name are never parsed, so a scoped run is cheaper than a full one at every stage — discovery,
+build and test.
+
+**A changed test file puts mutants in scope too.** A test file carries no mutants, so a run scoped
+to the diff alone would pass a test-only change without testing anything. Every test file in the
+scope therefore also puts in scope:
+
+- every mutant of the source it covers — `FooTests.swift` covers `Foo.swift` by the same naming
+  convention [Likely-killer tests first](#likely-killer-tests-first) uses, and the same
+  `likely-killer-tests` mapping overrides it;
+- every mutant `--baseline-report` records that test as having killed, wherever that mutant lives.
+  A test kills mutants in files the convention never pairs it with, and weakening it should be
+  caught. The report is the JSON `--output` wrote on an earlier full run; the tool reads the path
+  it is given and never goes looking for one.
+
+A deleted test file counts as changed: it has no lines left, but the source it covered goes back in
+scope whole.
+
+`--baseline-report` only widens a scope `--scope-lines` or `--since` already narrowed, so it
+requires one of them — given alone, it has nothing to widen and the run would test every mutant
+regardless.
+
+```bash
+# PR gate: the branch's own changes, judged also against what its tests used to kill
+swift-mutation-testing --since origin/main --baseline-report main-report.json
+```
+
+A scoped run that holds no mutant at all prints `No mutants in scope. Nothing to test.`, the scope
+it resolved, and exits `0` without building. A change that touches no mutable line passes; it does
+not fail and it does not silently score itself over nothing. The scope is printed so that a
+mistyped `--scope-lines` path is visible rather than passing as a green gate forever:
+
+```
+No mutants in scope. Nothing to test.
+Scope: Sources/Foo.swift:10-20, Tests/FooTests.swift:all
+```
+
+Any report `--output`, `--html-output` or `--sonar-output` asked for is still written, holding no
+mutants, so CI steps that expect the file to exist after every run still find it.
 
 ### Common invocations
 

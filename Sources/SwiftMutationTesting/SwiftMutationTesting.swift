@@ -46,7 +46,9 @@ public struct SwiftMutationTesting {
             fileValues: fileValues
         )
 
-        let (input, discoveryDuration) = try await discover(configuration: configuration)
+        let executionLauncher: any ProcessLaunching = launcher ?? defaultLauncher(for: configuration.build.projectType)
+        let scope = try await ScopeResolver(launcher: executionLauncher).resolve(configuration: configuration)
+        let (input, discoveryDuration) = try await discover(configuration: configuration, scope: scope)
 
         if !configuration.reporting.quiet {
             let schematizable = input.mutants.filter { $0.isSchematizable }.count
@@ -60,7 +62,13 @@ public struct SwiftMutationTesting {
                 ))
         }
 
-        let executionLauncher: any ProcessLaunching = launcher ?? defaultLauncher(for: configuration.build.projectType)
+        // A scope that holds no mutant passes: the change it was computed from touches nothing this
+        // run can test, which is an answer rather than a build worth paying for. An unscoped run
+        // that found no mutant was pointed at the wrong sources, and still goes the whole way.
+        if let scope, input.mutants.isEmpty {
+            reportEmptyScope(scope, configuration: configuration)
+            return .success
+        }
 
         let start = Date()
         let results = try await MutantExecutor(configuration: configuration, launcher: executionLauncher).execute(input)
@@ -73,7 +81,20 @@ public struct SwiftMutationTesting {
         return .success
     }
 
-    private static func discover(configuration: RunnerConfiguration) async throws -> (RunnerInput, TimeInterval) {
+    /// Says what the run was scoped to before passing it. A pass over no mutants is the one result
+    /// that looks the same whether the diff really touched nothing or a scope path was mistyped and
+    /// matched nothing, so the scope goes out with it — and the reports a run was asked for are
+    /// still written, empty, rather than leaving the paths a caller expects missing.
+    private static func reportEmptyScope(_ scope: MutantScope, configuration: RunnerConfiguration) {
+        print("\nNo mutants in scope. Nothing to test.")
+        print("Scope: \(scope)")
+        writeReports(RunnerSummary(results: [], totalDuration: 0), configuration: configuration)
+    }
+
+    private static func discover(
+        configuration: RunnerConfiguration,
+        scope: MutantScope?
+    ) async throws -> (RunnerInput, TimeInterval) {
         let start = Date()
         let discoveryInput = DiscoveryInput(
             projectPath: configuration.projectPath,
@@ -83,7 +104,8 @@ public struct SwiftMutationTesting {
             noCache: configuration.build.noCache,
             sourcesPath: configuration.filter.sourcesPath ?? configuration.projectPath,
             excludePatterns: configuration.filter.excludePatterns,
-            operators: configuration.filter.operators
+            operators: configuration.filter.operators,
+            scope: scope
         )
         let input = try await DiscoveryPipeline().run(input: discoveryInput)
         return (input, Date().timeIntervalSince(start))

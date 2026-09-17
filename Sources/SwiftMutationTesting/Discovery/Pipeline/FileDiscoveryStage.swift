@@ -1,22 +1,6 @@
 import Foundation
 
 struct FileDiscoveryStage: Sendable {
-    private static let fixedExclusions: [String] = [
-        "/Tests/",
-        "/Mocks/",
-        "/Stubs/",
-        "/Fakes/",
-        "/TestHelpers/",
-        "/TestSupport/",
-        "Tests.swift",
-        "Mock.swift",
-        "Spec.swift",
-        "/.build/",
-        "/.swift-mutation-testing-derived-data/",
-        "/\(CacheStore.directoryName)/",
-        "/DerivedData/",
-    ]
-
     func run(input: DiscoveryInput) throws -> [SourceFile] {
         let url = URL(fileURLWithPath: input.sourcesPath)
 
@@ -32,6 +16,7 @@ struct FileDiscoveryStage: Sendable {
             )
         else { throw FileDiscoveryError.sourcesPathNotFound(input.sourcesPath) }
 
+        let exclusion = SourceFileExclusion(patterns: input.excludePatterns)
         var sourceFiles: [SourceFile] = []
 
         for case let fileURL as URL in enumerator {
@@ -41,7 +26,13 @@ struct FileDiscoveryStage: Sendable {
 
             let path = fileURL.path
 
-            guard !isExcluded(path: path, excludePatterns: input.excludePatterns) else {
+            guard !exclusion.excludes(path: path) else {
+                continue
+            }
+
+            // A file the scope does not reach can hold no mutant the scope would keep, so a scoped
+            // run never pays to read or parse it.
+            guard input.scope?.covers(filePath: path) ?? true else {
                 continue
             }
 
@@ -53,19 +44,5 @@ struct FileDiscoveryStage: Sendable {
         }
 
         return sourceFiles
-    }
-
-    private func isExcluded(path: String, excludePatterns: [String]) -> Bool {
-        for pattern in Self.fixedExclusions {
-            if pattern.hasSuffix(".swift") {
-                if path.hasSuffix(pattern) {
-                    return true
-                }
-            } else if path.contains(pattern) {
-                return true
-            }
-        }
-
-        return excludePatterns.contains { path.contains($0) }
     }
 }
