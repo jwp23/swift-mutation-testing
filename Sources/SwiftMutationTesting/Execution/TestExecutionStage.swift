@@ -261,7 +261,9 @@ struct TestExecutionStage: Sendable {
 
     private func bundleSelection(in context: TestExecutionContext) throws -> BundleSelection {
         try BundleSelection.resolve(
-            artifact: context.artifact, testTarget: context.configuration.build.testTarget
+            artifact: context.artifact,
+            testTarget: context.configuration.build.testTarget,
+            testingFramework: context.configuration.build.testingFramework
         )
     }
 

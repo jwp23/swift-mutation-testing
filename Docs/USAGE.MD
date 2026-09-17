@@ -257,9 +257,11 @@ those bundles:
 - the first path component names the bundle — `MyLibTests` runs `MyLibTests.xctest` and nothing
   else;
 - anything after it is passed to the bundle as an XCTest selection
-  (`MyLibTests/MyClass/testMethod` runs only that test). **Known limitation:** this selection
-  applies to XCTest tests only. Swift Testing tests in the same bundle all run regardless, because
-  the bundle's Swift Testing entry point does not take an XCTest selector;
+  (`MyLibTests/MyClass/testMethod` runs only that test) — but only for XCTest projects. There is
+  no XCTest selector that can also scope Swift Testing tests in the same bundle, so on a Swift
+  Testing project a class- or method-level `--target` fails immediately with an error rather than
+  silently running none of the Swift Testing tests; use a bundle-level `--target <Bundle>` (no
+  class/method suffix) instead;
 - if no built bundle carries that name — which is what a toolchain that merges every test target
   into one `<Package>PackageTests.xctest` produces — there is no bundle to scope the run to, and
   the run fails immediately with an error naming the target, rather than silently running every
