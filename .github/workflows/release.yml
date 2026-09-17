@@ -17,13 +17,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Verify Swift version
         run: swift --version
 
       - name: Cache SwiftPM
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: .build
           key: ${{ runner.os }}-${{ runner.arch }}-spm-release-${{ hashFiles('**/Package.resolved', '**/Package.swift') }}
