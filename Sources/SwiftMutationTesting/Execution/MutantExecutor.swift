@@ -425,7 +425,9 @@ struct MutantExecutor: Sendable {
     ) async throws -> BaselineMeasurement {
         try await BaselineRunner(launcher: deps.launcher).measure(
             selection: BundleSelection.resolve(
-                artifact: artifact, testTarget: configuration.build.testTarget
+                artifact: artifact,
+                testTarget: configuration.build.testTarget,
+                testingFramework: configuration.build.testingFramework
             ),
             sandbox: sandbox,
             timeout: configuration.build.timeout * MutantTimeout.baselineCoefficient
