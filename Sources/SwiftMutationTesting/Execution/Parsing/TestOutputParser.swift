@@ -9,7 +9,7 @@ struct TestOutputParser: Sendable {
         var hasTestOutput = false
 
         for line in output.components(separatedBy: "\n") {
-            if let name = extractFailingTest(from: line) {
+            if let name = failingTest(in: line) {
                 return .killed(by: name)
             }
 
@@ -32,7 +32,10 @@ struct TestOutputParser: Sendable {
         return hasTestOutput ? .crashed : .unviable
     }
 
-    private func extractFailingTest(from line: String) -> String? {
+    /// The test a single line of output reports as failed, if it reports one. Exposed so a run read
+    /// as it streams can recognise the first failure by the same rules a parse of the whole output
+    /// uses.
+    func failingTest(in line: String) -> String? {
         if let name = extractXCTestFailure(from: line) {
             return name
         }
@@ -64,15 +67,28 @@ struct TestOutputParser: Sendable {
         return "\(parts[0]).\(parts[1])"
     }
 
+    /// Requires the record to start the line — after trimming and stripping the single result
+    /// glyph xcodebuild prefixes it with — rather than merely appearing anywhere in it, so a test
+    /// or the app under test printing this phrase mid-sentence cannot be mistaken for the
+    /// framework's own record.
     private func extractSwiftTestingFailure(from line: String) -> String? {
-        guard line.contains("Test \""), line.contains("\" failed") else { return nil }
+        var candidate = Substring(line.trimmingCharacters(in: .whitespaces))
+
+        if !candidate.hasPrefix("Test \""), let firstSpace = candidate.firstIndex(of: " ") {
+            let glyph = candidate[..<firstSpace]
+            if glyph.count == 1 {
+                candidate = candidate[candidate.index(after: firstSpace)...]
+            }
+        }
+
+        guard candidate.hasPrefix("Test \""), candidate.contains("\" failed") else { return nil }
 
         guard
-            let start = line.range(of: "Test \"")?.upperBound,
-            let end = line.range(of: "\" failed")?.lowerBound,
+            let start = candidate.range(of: "Test \"")?.upperBound,
+            let end = candidate.range(of: "\" failed")?.lowerBound,
             start < end
         else { return nil }
 
-        return String(line[start ..< end])
+        return String(candidate[start ..< end])
     }
 }

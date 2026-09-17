@@ -173,7 +173,8 @@ struct IncompatibleMutantExecutor: Sendable {
         )
         let duration = Date().timeIntervalSince(start)
 
-        let outcome = SPMResultParser().parse(exitCode: test.exitCode, output: test.output)
+        let outcome = SPMResultParser().parse(
+            exitCode: test.exitCode, output: test.output, stoppedAtFirstFailure: false)
         let status = outcome.asExecutionStatus
         let killerTestFile = resolveKillerTestFile(status: status)
 
@@ -275,7 +276,8 @@ struct IncompatibleMutantExecutor: Sendable {
             exitCode: captured.exitCode,
             output: captured.output,
             xcresultPath: xcresultPath,
-            duration: Date().timeIntervalSince(start)
+            duration: Date().timeIntervalSince(start),
+            stoppedAtFirstFailure: false
         )
     }
 

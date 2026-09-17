@@ -157,6 +157,7 @@ struct TestLaunchResult: Sendable {
     let output: String
     let xcresultPath: String
     let duration: Double
+    let stoppedAtFirstFailure: Bool
 }
 ```
 

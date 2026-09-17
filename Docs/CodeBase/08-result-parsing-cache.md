@@ -111,11 +111,17 @@ Returns `.testsKilled(reason: <first matching line>)` for test failures, `.proce
 
 ```swift
 struct SPMResultParser: Sendable {
-    func parse(exitCode: Int32, output: String) -> TestRunOutcome
+    func parse(exitCode: Int32, output: String, stoppedAtFirstFailure: Bool) -> TestRunOutcome
 }
 ```
 
 Parses SPM test results from exit code and stdout/stderr output only (no `.xcresult` bundles). Uses `TestOutputParser` to detect failure patterns.
+
+`stoppedAtFirstFailure` marks a run the launcher killed as soon as a test failed. Such a run dies
+from that signal, so its exit code describes the signal and not the suite: the exit-code rules
+below are skipped and the outcome comes from the output, which always contains the failure the
+stop was decided on. It is what keeps a fail-fast kill classified `.testsFailed` rather than
+`.timedOut` or `.crashed`.
 
 | Condition | Outcome |
 |---|---|

@@ -3,7 +3,7 @@ import Foundation
 struct XcodeProcessLauncher: Sendable, RunnerBackedProcessLaunching {
     func makeRunner() -> ProcessRunner {
         ProcessRunner(
-            onTimeout: { pid in
+            killProcessTree: { pid in
                 guard pid > 0 else { return }
                 kill(-pid, SIGTERM)
                 Task {

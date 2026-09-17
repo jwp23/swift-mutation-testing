@@ -107,4 +107,34 @@ struct TestOutputParserTests {
 
         #expect(result == .crashed)
     }
+
+    @Test("Given a single XCTest failure line, when the failing test is read from it, then it names that test")
+    func namesTheTestAnXCTestFailureLineReports() {
+        let line = "Test Case '-[MySuite myTest]' failed (0.001 seconds)."
+
+        #expect(TestOutputParser().failingTest(in: line) == "MySuite.myTest")
+    }
+
+    @Test("Given a single Swift Testing failure line, when the failing test is read from it, then it names that test")
+    func namesTheTestASwiftTestingFailureLineReports() {
+        let line = "\u{2717} Test \"myTestFunction\" failed after 0.001 seconds"
+
+        #expect(TestOutputParser().failingTest(in: line) == "myTestFunction")
+    }
+
+    @Test("Given a line reporting no failure, when the failing test is read from it, then it names nothing")
+    func namesNothingForALineReportingNoFailure() {
+        let line = "Test Case '-[MySuite myTest]' passed (0.001 seconds)."
+
+        #expect(TestOutputParser().failingTest(in: line) == nil)
+    }
+
+    @Test(
+        "Given a diagnostic line that only mentions a Swift Testing failure phrase mid-sentence, when the failing test is read from it, then it names nothing"
+    )
+    func namesNothingForADiagnosticLineMentioningTheFailurePhrase() {
+        let line = "note: see log for details — Test \"myTestFunction\" failed is a phrase the app itself prints"
+
+        #expect(TestOutputParser().failingTest(in: line) == nil)
+    }
 }

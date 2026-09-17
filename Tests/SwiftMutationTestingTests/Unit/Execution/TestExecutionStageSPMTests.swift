@@ -122,6 +122,33 @@ struct TestExecutionStageSPMTests {
         #expect(results.first?.status == .killed(by: "MySuite.myTest"))
     }
 
+    @Test(
+        "Given a bundle whose suite fails partway, when the mutant executes, then the run stops at that test and it is the killer"
+    )
+    func mutantRunStopsAtTheFirstFailingTest() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let output = """
+            Test Suite 'MyLibTests' started at 2026-01-01 00:00:00.000
+            Test Case '-[MySuite firstTest]' passed (0.001 seconds).
+            Test Case '-[MySuite secondTest]' failed (0.002 seconds).
+            Test Case '-[MySuite thirdTest]' passed (0.001 seconds).
+            """
+        let launcher = RecordingProcessLauncher(outcomes: [(exitCode: 0, output: output)])
+        let context = makeSPMContext(
+            sandboxes: [Sandbox(rootURL: dir)],
+            bundlePaths: [".build/debug/MyLibTests.xctest"]
+        )
+
+        let results = try await makeStage(launcher: launcher, in: dir)
+            .execute(mutants: [makeSPMMutant(id: "m0")], in: context)
+
+        #expect(results.first?.status == .killed(by: "MySuite.secondTest"))
+        #expect(await launcher.streamedLines.last == "Test Case '-[MySuite secondTest]' failed (0.002 seconds).")
+        #expect(await launcher.streamedLines.count == 3)
+    }
+
     @Test("Given a configured test target, when mutant executed, then only that target's bundle runs")
     func testTargetSelectsMatchingBundle() async throws {
         let dir = try FileHelpers.makeTemporaryDirectory()

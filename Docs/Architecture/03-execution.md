@@ -121,7 +121,12 @@ flowchart TD
 6. Parse the result via `ResultParser`
 7. Store status in `CacheStore`
 
-**Per-mutant execution (SPM):** steps 2–5 are replaced by running each built `.xctest` bundle with `xcrun xctest` from the worker's own sandbox, with `__SWIFT_MUTATION_TESTING_ACTIVE` set to the mutant ID and only what is left of the mutant's timeout. Bundles run in turn until one fails, and the result is parsed by `SPMResultParser`. A configured
+**Per-mutant execution (SPM):** steps 2–5 are replaced by running each built `.xctest` bundle with `xcrun xctest` from the worker's own sandbox, with `__SWIFT_MUTATION_TESTING_ACTIVE` set to the mutant ID and only what is left of the mutant's timeout. Bundles run in turn until one fails, and the result is parsed by `SPMResultParser`. Each bundle's
+own run is read line by line as it is produced and killed at the first test that reports a failure
+— the mutant is already killed and its killer already named, so the rest of the suite cannot change
+the verdict. The kill goes through the same descendant-scoped `killProcessTree` the timeout uses,
+and `TestLaunchResult.stoppedAtFirstFailure` tells `SPMResultParser` to read the verdict from the
+output rather than from the signal-derived exit code. A configured
 test target selects the bundle by name and any remaining `Class/method` component is passed on as
 an `-XCTest` selection — see [USAGE](../USAGE.MD#limiting-tests-to-a-target).
 
@@ -261,7 +266,7 @@ score = killed / (killed + survived + timedOut + noCoverage) × 100
 | `MutationCounter` | `actor` — tracks the current progress index |
 | `ConsoleProgressReporter` | `actor` — serialises output to stdout |
 | `TestExecutionStage` | `withThrowingTaskGroup` — N tasks, dynamically refilled |
-| `ProcessRunner` | `withTaskCancellationHandler` + `withCheckedThrowingContinuation` — kills process on cancel |
+| `ProcessRunner` | `withTaskCancellationHandler` + `withCheckedThrowingContinuation` — kills process on cancel; `launchStreaming` resumes once the process has exited and its output pipe has reached end of file, or a five-second grace after the exit if a descendant that escaped the process group is still holding the pipe open |
 | `SPMProcessLauncher` | `ProcessLaunching` conformance backed by `ProcessRunner`; `frozenDescendantPIDs(of:)` `SIGSTOP`s the launched process's tree and snapshots its descendants (via `sysctl` `KERN_PROC_ALL` parent-pid walk) before `SIGTERM`, so nothing can fork past the walk, and `killDescendants(_:)` kills that snapshot after the grace period to catch descendants that escaped the process group |
 | `SandboxCleaner` | `nonisolated(unsafe)` C pointer for signal handler access; `register`/`deregister` called sequentially from `MutantExecutor.execute` |
 | All data types | `Sendable` value types — safe to cross actor boundaries |

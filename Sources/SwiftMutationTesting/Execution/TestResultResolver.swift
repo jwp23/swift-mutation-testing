@@ -18,7 +18,11 @@ struct TestResultResolver: Sendable {
             )
 
         case .spm:
-            return SPMResultParser().parse(exitCode: launch.exitCode, output: launch.output)
+            return SPMResultParser().parse(
+                exitCode: launch.exitCode,
+                output: launch.output,
+                stoppedAtFirstFailure: launch.stoppedAtFirstFailure
+            )
         }
     }
 }
