@@ -45,7 +45,7 @@ struct FallbackExecutorTests {
         )
 
         let executor = FallbackExecutor(deps: deps, configuration: config)
-        let results = try await executor.execute(input: input, pool: pool)
+        let results = try await executor.execute(input: input, mutants: input.mutants, pool: pool)
 
         #expect(results.count == 1)
     }

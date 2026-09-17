@@ -655,6 +655,62 @@ struct MutantExecutorTests {
     }
 
     @Test(
+        "Given schema build excludes a mutant then fails outright, when execute called, then each mutant is reported once"
+    )
+    func schemaExcludedMutantsAreNotAlsoRunByFallback() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let fooFile = dir.appendingPathComponent("Foo.swift")
+        let barFile = dir.appendingPathComponent("Bar.swift")
+        try "let x = true".write(to: fooFile, atomically: true, encoding: .utf8)
+        try "let y = true".write(to: barFile, atomically: true, encoding: .utf8)
+
+        let executor = MutantExecutor(
+            configuration: makeRunnerConfiguration(projectPath: dir.path, projectType: .spm),
+            launcher: SPMExcludeThenUnattributableFailureMock()
+        )
+        let mutantFoo = makeMutantDescriptor(
+            id: "swift-mutation-testing_0",
+            filePath: fooFile.path,
+            column: 9,
+            utf8Offset: 8,
+            originalText: "true",
+            mutatedText: "false",
+            operatorIdentifier: "BooleanLiteralReplacement",
+            replacementKind: .booleanLiteral,
+            description: "true → false",
+            isSchematizable: true
+        )
+        let mutantBar = makeMutantDescriptor(
+            id: "swift-mutation-testing_1",
+            filePath: barFile.path,
+            column: 9,
+            utf8Offset: 8,
+            originalText: "true",
+            mutatedText: "false",
+            operatorIdentifier: "BooleanLiteralReplacement",
+            replacementKind: .booleanLiteral,
+            description: "true → false",
+            isSchematizable: true
+        )
+        let input = makeRunnerInput(
+            projectPath: dir.path,
+            projectType: .spm,
+            schematizedFiles: [
+                SchematizedFile(originalPath: fooFile.path, schematizedContent: "let x = false"),
+                SchematizedFile(originalPath: barFile.path, schematizedContent: "let y = false"),
+            ],
+            mutants: [mutantFoo, mutantBar]
+        )
+
+        let results = try await executor.execute(input)
+
+        #expect(results.count == 2)
+        #expect(Set(results.map(\.descriptor.id)).count == 2)
+    }
+
+    @Test(
         "Given all mutants cached and no test files changed, when execute called, then returns from cache without building"
     )
     func allCachedWithUnchangedTestFilesReturnsCachedResults() async throws {

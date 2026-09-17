@@ -271,12 +271,15 @@ struct FallbackExecutor: Sendable {
 
     func execute(
         input: RunnerInput,
+        mutants: [MutantDescriptor],
         pool: SimulatorPool
     ) async throws -> [ExecutionResult]
 }
 ```
 
 When the baseline build for all schematized files fails (`BuildError.compilationFailed`), `MutantExecutor` delegates to `FallbackExecutor`. This executor rebuilds one schematized file at a time.
+
+`mutants` is the set to test, not `input.mutants`: mutants the schema build had to exclude are rerouted to `IncompatibleMutantExecutor`, and testing them here too would report them twice.
 
 ```mermaid
 flowchart TD
