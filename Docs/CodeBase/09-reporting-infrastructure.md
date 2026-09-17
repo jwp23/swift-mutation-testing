@@ -381,17 +381,32 @@ protocol ProcessLaunching: Sendable {
     func launchCapturing(
         _ request: ProcessRequest
     ) async throws -> (exitCode: Int32, output: String)
+
+    func launchStreaming(
+        _ request: ProcessRequest,
+        stopWhen: @escaping @Sendable (String) -> Bool
+    ) async throws -> StreamedProcessResult
 }
 ```
 
 Abstraction over process execution. `launch` discards output (stdout/stderr → `/dev/null`). `launchCapturing` accepts a `ProcessRequest` value, captures combined stdout+stderr, and returns it as a `String`.
 
-Return value `-1` from either method means the process was killed by the timeout handler.
+`launchStreaming` reads the output as it is produced, offers every completed line to `stopWhen`,
+and kills the process tree at the first line accepted — the fail-fast path `TestExecutionStage`
+uses to stop a mutant's test run at its first failing test. It returns a `StreamedProcessResult`
+(`exitCode`, `output`, `stoppedEarly`); a launcher with no streaming of its own inherits a default
+implementation that runs the process to completion, offers no line, and reports
+`stoppedEarly: false`.
+
+Return value `-1` from `launch`/`launchCapturing` means the process was killed by the timeout
+handler or by task cancellation — both paths mark the same `killedByUs` flag before killing the
+process tree. A `stoppedEarly` result instead carries the signal-derived status of the process the
+runner killed, which is why callers classify it from `output` rather than from `exitCode`.
 
 `RunnerBackedProcessLaunching: ProcessLaunching` (same file) is a protocol for conformers backed
 by a `ProcessRunner`: it requires only `func makeRunner() -> ProcessRunner` and supplies
-`launch`/`launchCapturing` as a default extension forwarding to `makeRunner()`. Both
-`SPMProcessLauncher` and `XcodeProcessLauncher` conform to it instead of duplicating the
+`launch`/`launchCapturing`/`launchStreaming` as a default extension forwarding to `makeRunner()`.
+Both `SPMProcessLauncher` and `XcodeProcessLauncher` conform to it instead of duplicating the
 forwarding methods.
 
 ---
@@ -420,27 +435,77 @@ struct ProcessRequest: Sendable {
 
 ---
 
+## Infrastructure/StreamedProcessResult.swift
+
+```swift
+struct StreamedProcessResult: Sendable {
+    let exitCode: Int32
+    let output: String
+    let stoppedEarly: Bool
+}
+```
+
+Result of a `launchStreaming` call. `stoppedEarly` marks a run the launcher itself killed because
+a line matched the caller's stop condition; that process died from the signal that stopped it, so
+`exitCode` reports the signal rather than any verdict and the caller must read the verdict from
+`output` — which always contains the line the stop was decided on.
+
+---
+
+## Infrastructure/OutputLineBuffer.swift
+
+```swift
+final class OutputLineBuffer: @unchecked Sendable {
+    var output: String
+    func append(_ chunk: Data) -> [String]
+}
+```
+
+Accumulates a streamed process's output and returns each line once it is complete, holding a
+trailing partial line back until a later chunk finishes it. Lines are split on the raw bytes, not
+on decoded text, because a read can end in the middle of a multi-byte character. `NSLock`-guarded:
+Foundation runs the pipe's readability handler on its own queue.
+
+---
+
 ## Infrastructure/ProcessRunner.swift
 
 ```swift
 struct ProcessRunner: Sendable {
     var postTerminationCleanup: (@Sendable (Int32) -> Void)?
-    let onTimeout: @Sendable (Int32) -> Void
+    let killProcessTree: @Sendable (Int32) -> Void
 
     func launch(executableURL:arguments:workingDirectoryURL:timeout:) async throws -> Int32
     func launchCapturing(_ request: ProcessRequest) async throws -> (exitCode: Int32, output: String)
+    func launchStreaming(_ request: ProcessRequest, stopWhen: @escaping @Sendable (String) -> Bool)
+        async throws -> StreamedProcessResult
 }
 ```
 
 Low-level process execution engine. Uses `withTaskCancellationHandler` + `withCheckedThrowingContinuation` to bridge `Process.terminationHandler` into the Swift Concurrency runtime.
 
-**Timeout handling:** a `Task` sleeping for `timeout` seconds marks a `KilledByUsFlag` and calls `onTimeout(pid)`. The `terminationHandler` checks the flag and returns `-1` instead of the actual exit code.
+**Timeout handling:** a `Task` sleeping for `timeout` seconds marks a `OneWayFlag` and calls `killProcessTree(pid)`. The `terminationHandler` checks the flag and returns `-1` instead of the actual exit code.
 
-**Cancellation handling:** `onCancel` marks the flag and calls `onTimeout(pid)` immediately, ensuring the continuation is always resumed via the `terminationHandler`.
+**Cancellation handling:** `onCancel` marks the flag and calls `killProcessTree(pid)` immediately, ensuring the continuation is always resumed via the `terminationHandler`.
 
 **Post-termination cleanup:** `postTerminationCleanup` is called after every process termination (success or failure); `SPMProcessLauncher` uses it to `SIGKILL` the process group.
 
 `launchCapturing` writes output to a temporary file (UUID-named) and reads it in the `terminationHandler` to avoid pipe buffer limits. Sets process group via `setpgid(pid, pid)` to enable group signaling.
+
+**Streaming:** `launchStreaming` reads through a `Pipe` instead, accumulating bytes in an
+`OutputLineBuffer` and offering each completed line to `stopWhen`. The first accepted line marks a
+second `OneWayFlag` and calls the same `killProcessTree(pid)` the timeout uses — there is no
+separate kill path. The launch normally resumes once the process has exited *and* the pipe has
+reached end of file, since output can still arrive after the termination handler runs.
+
+End of file is not guaranteed. A descendant that left the process group *before* the root exited
+keeps the write end open and is beyond every signal that remains: the group signal never covered
+it, and once the root has been reaped the parent-pid walk `killProcessTree` depends on can no
+longer find it (its survivors have been reparented). What bounds the launch is therefore not the
+timeout — which is cancelled when the process exits, as on the other two paths — but
+`ProcessRunner.outputGracePeriod` (5 s): once the process has exited, output still arriving has
+that long to finish, and the launch then returns with what it read. Partial output a caller can
+still reach a verdict from beats a launch that never returns.
 
 ---
 
@@ -456,7 +521,7 @@ SPM-specific implementation of `ProcessLaunching`, via the `RunnerBackedProcessL
 protocol (`launch`/`launchCapturing` come from that protocol's default extension —
 `XcodeProcessLauncher` conforms the same way). `makeRunner()` configures a `ProcessRunner` with:
 - `postTerminationCleanup`: kills the process group via `kill(-pid, SIGKILL)`
-- `onTimeout`: freezes and snapshots the launched process's descendants via
+- `killProcessTree`: freezes and snapshots the launched process's descendants via
   `frozenDescendantPIDs(of:)` *before* sending `SIGTERM`, then after a five-second grace period
   sends `kill(-pid, SIGKILL)` and kills that snapshot via `killDescendants(_:)`
 

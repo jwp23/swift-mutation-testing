@@ -6,7 +6,7 @@ struct SPMProcessLauncher: Sendable, RunnerBackedProcessLaunching {
             postTerminationCleanup: { pid in
                 kill(-pid, SIGKILL)
             },
-            onTimeout: { pid in
+            killProcessTree: { pid in
                 guard pid > 0 else { return }
                 // Snapshot descendants while the root is still alive: once it exits and is
                 // reaped, the kernel reparents any surviving descendant to launchd (ppid 1),
@@ -103,13 +103,12 @@ func descendantPIDs(of rootPID: Int32) -> [DescendantSnapshot] {
 /// escaped descendant is never signalled by the root group's `SIGTERM` and would go on forking
 /// children the snapshot does not name.
 ///
-/// The root frozen here is SwiftPM's CLI driver (`swift test --skip-build`, see
-/// `TestExecutionStage.launchSPM`), not the compiled test binary — that binary is one of the
-/// descendants. Whether the driver installs a `SIGTERM` handler is unconfirmed, so the cost of
-/// not resuming it is unverified in the handler-present case: the run would wait out the full
-/// grace period before `SIGKILL` rather than the driver exiting promptly, and SwiftPM's own
-/// teardown would not run. Bounded either way — a timed-out mutant's result is discarded as a
-/// Timeout regardless.
+/// The root frozen here is the `xcrun` that launches a mutant's test bundle (see
+/// `TestExecutionStage.launchSPM`), not the test binary itself — that binary is one of the
+/// descendants. Whether either installs a `SIGTERM` handler is unconfirmed, so the cost of not
+/// resuming the tree is unverified in the handler-present case: the run would wait out the full
+/// grace period before `SIGKILL` rather than exiting promptly. Bounded either way — a mutant
+/// killed here is already decided, whether by its timeout or by its first failing test.
 ///
 /// Residual race: a fork the kernel has already accepted when `SIGSTOP` lands still completes.
 /// Ordinary POSIX signals offer no atomic process-group freeze, so that window stays open.

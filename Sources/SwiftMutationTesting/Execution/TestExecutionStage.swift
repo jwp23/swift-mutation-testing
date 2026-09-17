@@ -127,7 +127,11 @@ struct TestExecutionStage: Sendable {
         in context: TestExecutionContext
     ) async throws -> ExecutionResult {
         let launched = try await launchSPM(mutant: mutant, worker: worker, in: context)
-        let outcome = SPMResultParser().parse(exitCode: launched.exitCode, output: launched.output)
+        let outcome = SPMResultParser().parse(
+            exitCode: launched.exitCode,
+            output: launched.output,
+            stoppedAtFirstFailure: launched.stoppedAtFirstFailure
+        )
         return await recordResult(mutant: mutant, key: key, outcome: outcome, duration: launched.duration)
     }
 
@@ -163,7 +167,9 @@ struct TestExecutionStage: Sendable {
     /// environment. The tests named for the mutated source run first: one of them failing settles
     /// the mutant without the whole suite ever starting, while all of them passing proves nothing
     /// — only the whole suite can call a mutant survived, so it runs next. Both runs come out of
-    /// the one per-mutant timeout.
+    /// the one per-mutant timeout, and each stops at the first test that fails rather than
+    /// finishing its suite: one failing test already kills the mutant and names its killer, so
+    /// every test after it is work that cannot change the result.
     private func launchSPM(
         mutant: MutantDescriptor,
         worker: Int,
@@ -186,7 +192,8 @@ struct TestExecutionStage: Sendable {
             if run.exitCode != 0 {
                 return TestLaunchResult(
                     exitCode: run.exitCode, output: run.output,
-                    xcresultPath: "", duration: Date().timeIntervalSince(start)
+                    xcresultPath: "", duration: Date().timeIntervalSince(start),
+                    stoppedAtFirstFailure: run.stoppedAtFirstFailure
                 )
             }
         }
@@ -198,7 +205,8 @@ struct TestExecutionStage: Sendable {
 
         return TestLaunchResult(
             exitCode: run.exitCode, output: run.output,
-            xcresultPath: "", duration: Date().timeIntervalSince(start)
+            xcresultPath: "", duration: Date().timeIntervalSince(start),
+            stoppedAtFirstFailure: run.stoppedAtFirstFailure
         )
     }
 
@@ -223,15 +231,16 @@ struct TestExecutionStage: Sendable {
         mutant: MutantDescriptor,
         sandbox: Sandbox,
         deadline: Date
-    ) async throws -> (exitCode: Int32, output: String) {
+    ) async throws -> (exitCode: Int32, output: String, stoppedAtFirstFailure: Bool) {
         var output = ""
         var exitCode: Int32 = 0
+        var stoppedAtFirstFailure = false
 
         for bundlePath in bundlePaths {
             let remaining = deadline.timeIntervalSinceNow
 
             guard remaining > 0 else {
-                return (SPMResultParser.timeoutExitCode, output)
+                return (SPMResultParser.timeoutExitCode, output, false)
             }
 
             var arguments = ["xctest"]
@@ -242,7 +251,7 @@ struct TestExecutionStage: Sendable {
 
             arguments.append(sandbox.rootURL.appendingPathComponent(bundlePath).path)
 
-            let captured = try await deps.launcher.launchCapturing(
+            let streamed = try await deps.launcher.launchStreaming(
                 ProcessRequest(
                     executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
                     arguments: arguments,
@@ -252,16 +261,18 @@ struct TestExecutionStage: Sendable {
                     ],
                     workingDirectoryURL: sandbox.rootURL,
                     timeout: remaining
-                )
+                ),
+                stopWhen: { TestOutputParser().failingTest(in: $0) != nil }
             )
 
-            output += captured.output
-            exitCode = captured.exitCode
+            output += streamed.output
+            exitCode = streamed.exitCode
+            stoppedAtFirstFailure = streamed.stoppedEarly
 
-            if exitCode != 0 { break }
+            if stoppedAtFirstFailure || exitCode != 0 { break }
         }
 
-        return (exitCode, output)
+        return (exitCode, output, stoppedAtFirstFailure)
     }
 
     private func bundleSelection(in context: TestExecutionContext) -> BundleSelection {
@@ -330,7 +341,8 @@ struct TestExecutionStage: Sendable {
             exitCode: captured.exitCode,
             output: captured.output,
             xcresultPath: xcresultPath,
-            duration: Date().timeIntervalSince(start)
+            duration: Date().timeIntervalSince(start),
+            stoppedAtFirstFailure: false
         )
     }
 }
