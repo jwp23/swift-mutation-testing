@@ -45,6 +45,7 @@ repos:
       - id: end-of-file-fixer
         name: ✓ Ensure newline at EOF
         description: Ensure files end with a single newline character.
+        exclude: ^\.beads/(config\.yaml|metadata\.json)$
 
       - id: trailing-whitespace
         name: ✓ Trim trailing whitespace
