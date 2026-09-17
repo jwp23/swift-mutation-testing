@@ -3,6 +3,7 @@ import Foundation
 enum BuildError: Error, Equatable, LocalizedError {
     case compilationFailed(output: String)
     case xctestrunNotFound
+    case testBundleNotFound
 
     var errorDescription: String? {
         switch self {
@@ -13,6 +14,9 @@ enum BuildError: Error, Equatable, LocalizedError {
 
         case .xctestrunNotFound:
             return "xctestrun file not found after build."
+
+        case .testBundleNotFound:
+            return "No .xctest bundle found after build."
         }
     }
 
@@ -20,6 +24,7 @@ enum BuildError: Error, Equatable, LocalizedError {
         switch (lhs, rhs) {
         case (.compilationFailed, .compilationFailed): return true
         case (.xctestrunNotFound, .xctestrunNotFound): return true
+        case (.testBundleNotFound, .testBundleNotFound): return true
         default: return false
         }
     }

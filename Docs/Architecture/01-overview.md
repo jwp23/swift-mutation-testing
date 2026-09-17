@@ -109,7 +109,7 @@ flowchart LR
 | Invariant | Enforcement |
 |---|---|
 | Original project is never modified | All mutations happen inside `$TMPDIR/xmr-<UUID>/` sandbox |
-| Build runs exactly once for the normal path | `BuildStage` builds once (Xcode: `build-for-testing`, SPM: `swift build --build-tests`); `TestExecutionStage` uses `test-without-building` (Xcode) or `swift test --skip-build` (SPM) |
+| Build runs exactly once for the normal path | `BuildStage` builds once (Xcode: `build-for-testing`, SPM: `swift build --build-tests`); `TestExecutionStage` uses `test-without-building` (Xcode) or runs the already-built `.xctest` bundles with `xcrun xctest` (SPM) |
 | No mutant results are lost or duplicated | `MutationCounter` tracks total; `withThrowingTaskGroup` accounts for every task |
 | Mutant positions are accurate | UTF-8 offsets are preserved from AST through to final report |
 | A cancelled task never permanently holds a simulator slot | `withTaskCancellationHandler` in `SimulatorPool.acquire` releases the slot on cancel |

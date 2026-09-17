@@ -2,8 +2,8 @@ import Foundation
 
 @testable import SwiftMutationTesting
 
+/// Builds successfully, then throws when a mutant's test bundle is launched.
 actor ThrowingDuringTestMock: ProcessLaunching {
-    private var testCallCount = 0
 
     func launch(
         executableURL: URL,
@@ -15,12 +15,12 @@ actor ThrowingDuringTestMock: ProcessLaunching {
     func launchCapturing(
         _ request: ProcessRequest
     ) async throws -> (exitCode: Int32, output: String) {
-        if request.arguments.first == "test" {
-            testCallCount += 1
-            if testCallCount > 1 {
-                throw CocoaError(.fileReadNoSuchFile)
-            }
+        writeMockedTestBundle(for: request)
+
+        if request.arguments.first == "xctest" {
+            throw CocoaError(.fileReadNoSuchFile)
         }
+
         return (0, "")
     }
 }

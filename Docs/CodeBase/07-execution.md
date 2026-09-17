@@ -104,9 +104,11 @@ A fresh `.xctestrun` file is written for each mutant (UUID-named, deleted after 
 ```swift
 struct TestExecutionContext: Sendable {
     let artifact: BuildArtifact
-    let sandbox: Sandbox
+    let sandboxes: [Sandbox]
     let pool: SimulatorPool
     let configuration: RunnerConfiguration
+
+    func sandbox(forWorker worker: Int) -> Sandbox
 }
 ```
 
@@ -114,8 +116,8 @@ Bundles the execution-time dependencies required by `TestExecutionStage` and the
 
 | Field | Description |
 |---|---|
-| `artifact` | Build output containing the `.xctestrun` plist |
-| `sandbox` | The sandbox directory hosting derived data and temporary files |
+| `artifact` | Build output containing the `.xctestrun` plist (Xcode) or the built `.xctest` bundle paths (SPM) |
+| `sandboxes` | One sandbox per worker; `sandbox(forWorker:)` hands each worker its own, wrapping when a caller supplies fewer sandboxes than workers |
 | `pool` | Simulator slot pool for acquiring/releasing parallel slots |
 | `configuration` | Full runner configuration (timeout, concurrency, testTarget, etc.) |
 

@@ -30,13 +30,16 @@ Creates an isolated copy of the project in `$TMPDIR/xmr-<UUID>/`. Supports both 
 
 Every sandbox root is created under [`SandboxDirectoryLock`](#sandboxsandboxdirectorylockswift) and records the creating process id in `.owner-pid`, which is how `SandboxCleaner.removeOrphaned` tells a live run's sandbox from an abandoned one.
 
-**Three factory methods:**
+**Factory methods:**
 
 | Method | Used by | Description |
 |---|---|---|
 | `create(projectPath:schematizedFiles:supportFileContent:)` | `MutantExecutor` for schematizable path | Embeds all schematized files; injects support file; disables SwiftLint phases |
 | `createClean(projectPath:)` | `IncompatibleMutantExecutor` for SPM shared sandbox | Clean sandbox without mutations; mutated files are written directly later |
 | `create(projectPath:mutatedFilePath:mutatedContent:)` | `IncompatibleMutantExecutor` for Xcode path | Writes a single mutated file; no support file injection |
+| `replicate(_:)` | `MutantExecutor` for every SPM worker after the first | Copies an already-built sandbox — build products included — into a fresh root with its own `.owner-pid`; symlinked project files stay symlinks |
+
+`replicate` gives each worker a working directory and a build directory no other worker touches. It does not isolate *linked* products: SwiftPM bakes an absolute rpath into the test bundle, so frameworks a bundle links dynamically still load from the sandbox that built them. That is harmless — the code is identical and the mutant is selected at runtime through `__SWIFT_MUTATION_TESTING_ACTIVE`.
 
 **Copy strategy:**
 
@@ -99,11 +102,11 @@ Handles cleanup of orphaned and active sandbox directories.
 | Method | Description |
 |---|---|
 | `removeOrphaned(in:)` | Scans the directory for `xmr-*` entries and removes those whose `.owner-pid` names a process that is no longer running. Called once at startup to clean up sandboxes from interrupted runs, leaving concurrent runs' sandboxes intact. An entry with no readable pid record is treated as orphaned |
-| `register(_:)` | Stores the sandbox root path in a C pointer accessible to signal handlers |
-| `deregister()` | Clears the stored path and deallocates the pointer |
-| `installSignalHandlers()` | Installs `SIGINT` and `SIGTERM` handlers that remove the active sandbox and call `_exit(1)` |
+| `register(_:)` | Adds the sandbox root path to the list of C pointers accessible to signal handlers |
+| `deregister()` | Clears every stored path and deallocates the pointers |
+| `installSignalHandlers()` | Installs `SIGINT` and `SIGTERM` handlers that remove the active sandboxes and call `_exit(1)` |
 
-The active sandbox path is stored as a `nonisolated(unsafe)` `UnsafeMutablePointer<CChar>` at module scope — necessary because C signal handlers cannot capture Swift context. `register`/`deregister` are called sequentially from `MutantExecutor.execute`, so no concurrent access occurs during normal operation.
+The active sandbox paths are stored as `nonisolated(unsafe)` `UnsafeMutablePointer<CChar>` values at module scope — necessary because C signal handlers cannot capture Swift context. A run registers one sandbox per worker, so `cleanupActiveSandboxes()` removes all of them. `register`/`deregister` are called sequentially from `MutantExecutor.execute`, so no concurrent access occurs during normal operation.
 
 ---
 
@@ -161,7 +164,7 @@ flowchart TD
 
 Auto-detects project format: prefers `-workspace` if a `.xcworkspace` exists, falls back to `-project` for `.xcodeproj`.
 
-**SPM path (`buildSPM`):** Runs `swift build --build-tests` in the sandbox directory. Returns a `BuildArtifact` with the sandbox path (no `.xctestrun` needed).
+**SPM path (`buildSPM`):** Runs `swift build --build-tests` in the sandbox directory, then lists the `.xctest` bundles SwiftPM linked into `.build/debug` (resolving that symlink, which directory enumeration does not follow). Returns a `BuildArtifact` carrying those bundle paths relative to the sandbox root; a build that produces no bundle throws `BuildError.testBundleNotFound`.
 
 Derived data is placed at `<sandbox>/.xmr-derived-data` to keep it inside the sandbox directory.
 
@@ -172,16 +175,18 @@ Derived data is placed at `<sandbox>/.xmr-derived-data` to keep it inside the sa
 ```swift
 struct BuildArtifact: Sendable {
     let derivedDataPath: String
-    let xctestrunURL: URL
-    let plist: XCTestRunPlist
+    let xctestrunURL: URL?
+    let plist: XCTestRunPlist?
+    let testBundlePaths: [String]
 }
 ```
 
 | Field | Description |
 |---|---|
 | `derivedDataPath` | Path passed to `-derivedDataPath`; reused by `test-without-building` |
-| `xctestrunURL` | URL of the `.xctestrun` file in `Build/Products` |
-| `plist` | Parsed representation of the `.xctestrun` plist |
+| `xctestrunURL` | URL of the `.xctestrun` file in `Build/Products` (Xcode only) |
+| `plist` | Parsed representation of the `.xctestrun` plist (Xcode only) |
+| `testBundlePaths` | `.xctest` bundles built by SPM, relative to the sandbox root so a worker resolves them inside its own copy; empty for Xcode |
 
 ---
 
@@ -191,6 +196,7 @@ struct BuildArtifact: Sendable {
 enum BuildError: Error, Equatable, LocalizedError {
     case compilationFailed(output: String)
     case xctestrunNotFound
+    case testBundleNotFound
 
     var errorDescription: String? { get }
 }

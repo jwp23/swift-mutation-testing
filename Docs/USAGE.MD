@@ -151,7 +151,7 @@ mutators:
 |---|---|---|---|
 | `scheme` | String | — | Xcode scheme to build and test (required for Xcode projects, omit for SPM) |
 | `destination` | String | — | `xcodebuild` destination specifier (required for Xcode projects, omit for SPM) |
-| `testTarget` | String | — | Limit test execution to this target (`-only-testing`) |
+| `testTarget` | String | — | Limit test execution to this target (Xcode: `-only-testing`; SPM: see [Limiting tests to a target](#limiting-tests-to-a-target)) |
 | `timeout` | Number | `120` (Xcode) / `30` (SPM) | Per-mutant test timeout in seconds |
 | `concurrency` | Number | `max(1, CPUs − 1)` | Number of parallel test workers |
 | `noCache` | Boolean | `false` | Disable result caching |
@@ -221,7 +221,7 @@ swift-mutation-testing [project-path] [options]
 |---|---|
 | `--scheme <scheme>` | Xcode scheme to build and test (required for Xcode, omit for SPM) |
 | `--destination <destination>` | `xcodebuild` destination specifier (required for Xcode, omit for SPM) |
-| `--target <test-target>` | Limit test execution to this target |
+| `--target <test-target>` | Limit test execution to this target (see [Limiting tests to a target](#limiting-tests-to-a-target)) |
 | `--timeout <seconds>` | Per-mutant test timeout (default: 120 Xcode, 30 SPM) |
 | `--concurrency <n>` | Parallel workers (default: CPUs − 1) |
 | `--no-cache` | Disable result caching |
@@ -233,6 +233,31 @@ swift-mutation-testing [project-path] [options]
 | `--operator <id>` | Activate only this operator (repeatable) |
 | `--disable-mutator <id>` | Deactivate this operator (repeatable) |
 | `--quiet` | Suppress progress output |
+
+### Limiting tests to a target
+
+`--target` (config: `testTarget`) is interpreted differently per project type.
+
+**Xcode projects** pass the value straight to `xcodebuild -only-testing`, so
+`MyAppTests`, `MyAppTests/MyClass` and `MyAppTests/MyClass/testMethod` all work as usual.
+
+**SPM packages** run the test bundles the single build produced, so the value is resolved against
+those bundles:
+
+- the first path component names the bundle — `MyLibTests` runs `MyLibTests.xctest` and nothing
+  else;
+- anything after it is passed to the bundle as an XCTest selection
+  (`MyLibTests/MyClass/testMethod` runs only that test). **Known limitation:** this selection
+  applies to XCTest tests only. Swift Testing tests in the same bundle all run regardless, because
+  the bundle's Swift Testing entry point does not take an XCTest selector;
+- if no built bundle carries that name — which is what a toolchain that merges every test target
+  into one `<Package>PackageTests.xctest` produces — every bundle runs, with any selector still
+  applied, and the run prints
+  `⚠ No built test bundle is named '<target>' — running every test bundle` so the fallback is
+  never silent.
+
+Running more tests than requested cannot change a mutant's kill/survive verdict; it only costs
+runtime.
 
 ### Common invocations
 

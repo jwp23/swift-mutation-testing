@@ -13,7 +13,7 @@ struct MutantExecutor: Sendable {
     private struct MutantRunContext {
         let deps: ExecutionDeps
         let input: RunnerInput
-        let sandbox: Sandbox
+        let sandboxes: [Sandbox]
         let pool: SimulatorPool
         let artifact: BuildArtifact?
         let schemaBuildExcluded: [MutantDescriptor]
@@ -54,6 +54,7 @@ struct MutantExecutor: Sendable {
         SandboxCleaner.register(sandbox)
 
         let (artifact, schemaBuildExcluded) = try await buildArtifact(sandbox: sandbox, input: input, deps: deps)
+        let sandboxes = try workerSandboxes(buildSandbox: sandbox, artifact: artifact)
         let pool = try await makePool(launcher: launcher)
         try await pool.setUp()
         await reporter.report(.simulatorPoolReady(size: pool.size))
@@ -64,7 +65,7 @@ struct MutantExecutor: Sendable {
                 MutantRunContext(
                     deps: deps,
                     input: input,
-                    sandbox: sandbox,
+                    sandboxes: sandboxes,
                     pool: pool,
                     artifact: artifact,
                     schemaBuildExcluded: schemaBuildExcluded
@@ -72,18 +73,42 @@ struct MutantExecutor: Sendable {
             )
         } catch {
             await pool.tearDown()
-            try? sandbox.cleanup()
-            SandboxCleaner.deregister()
+            cleanUp(sandboxes)
             throw error
         }
 
         await pool.tearDown()
-        try? sandbox.cleanup()
-        SandboxCleaner.deregister()
+        cleanUp(sandboxes)
         try await cacheStore.persist()
         try await cacheStore.persistMetadata(metadata)
 
         return results
+    }
+
+    /// The sandboxes this run's workers execute in: the sandbox that was built, plus a copy of it
+    /// for every other worker. SPM workers run the built test bundles concurrently, and a copy
+    /// each keeps them out of one another's build directory. Xcode workers select their tests
+    /// through an xctestrun plist against one shared build, so they need no copies.
+    private func workerSandboxes(buildSandbox: Sandbox, artifact: BuildArtifact?) throws -> [Sandbox] {
+        guard artifact != nil, case .spm = configuration.build.projectType else { return [buildSandbox] }
+
+        let factory = SandboxFactory()
+        var sandboxes = [buildSandbox]
+
+        for _ in 1 ..< max(1, configuration.build.concurrency) {
+            let replica = try factory.replicate(buildSandbox)
+            SandboxCleaner.register(replica)
+            sandboxes.append(replica)
+        }
+
+        return sandboxes
+    }
+
+    private func cleanUp(_ sandboxes: [Sandbox]) {
+        for sandbox in sandboxes {
+            try? sandbox.cleanup()
+        }
+        SandboxCleaner.deregister()
     }
 
     private func prepareCacheStore(
@@ -125,7 +150,7 @@ struct MutantExecutor: Sendable {
     ) async throws -> [ExecutionResult] {
         let deps = context.deps
         let input = context.input
-        let sandbox = context.sandbox
+        let sandboxes = context.sandboxes
         let pool = context.pool
         let artifact = context.artifact
         let schemaBuildExcluded = context.schemaBuildExcluded
@@ -156,10 +181,10 @@ struct MutantExecutor: Sendable {
 
         if let artifact {
             if case .spm = configuration.build.projectType {
-                await validateSPMBaseline(sandbox: sandbox, deps: deps)
+                await validateSPMBaseline(sandbox: sandboxes[0], deps: deps)
             }
             let context = TestExecutionContext(
-                artifact: artifact, sandbox: sandbox, pool: pool,
+                artifact: artifact, sandboxes: sandboxes, pool: pool,
                 configuration: configuration
             )
             results += try await runNormal(deps: deps, context: context, schematizable: testableSchematizable)

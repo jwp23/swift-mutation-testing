@@ -201,4 +201,14 @@ struct ConsoleProgressReporterTests {
 
         #expect(output.isEmpty)
     }
+
+    @Test("Given testTargetMatchedNoBundle event, when reported, then the target and the fallback are named")
+    func testTargetMatchedNoBundleWarnsAboutRunningEveryBundle() async {
+        let output = await captureOutput {
+            await reporter.report(.testTargetMatchedNoBundle(testTarget: "MyLibTests"))
+        }
+
+        #expect(output.contains("MyLibTests"))
+        #expect(output.contains("every test bundle"))
+    }
 }

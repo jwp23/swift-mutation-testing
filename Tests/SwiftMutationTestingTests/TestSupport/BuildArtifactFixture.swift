@@ -8,5 +8,5 @@ func makeBuildArtifact(in dir: URL) -> BuildArtifact {
         fromPropertyList: plistDict, format: .xml, options: 0
     )
     let plist = XCTestRunPlist(data)!
-    return BuildArtifact(derivedDataPath: dir.path, xctestrunURL: dir, plist: plist)
+    return BuildArtifact(derivedDataPath: dir.path, xctestrunURL: dir, plist: plist, testBundlePaths: [])
 }

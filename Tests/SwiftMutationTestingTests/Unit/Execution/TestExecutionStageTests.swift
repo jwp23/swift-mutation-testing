@@ -40,7 +40,7 @@ struct TestExecutionStageTests {
 
         let context = TestExecutionContext(
             artifact: makeBuildArtifact(in: dir),
-            sandbox: Sandbox(rootURL: dir),
+            sandboxes: [Sandbox(rootURL: dir)],
             pool: pool,
             configuration: makeRunnerConfiguration()
         )
@@ -113,7 +113,7 @@ struct TestExecutionStageTests {
         let noCacheConfig = makeRunnerConfiguration(noCache: true)
         let context = TestExecutionContext(
             artifact: makeBuildArtifact(in: dir),
-            sandbox: Sandbox(rootURL: dir),
+            sandboxes: [Sandbox(rootURL: dir)],
             pool: pool,
             configuration: noCacheConfig
         )
@@ -169,7 +169,7 @@ struct TestExecutionStageTests {
         )
         let context = TestExecutionContext(
             artifact: makeBuildArtifact(in: dir),
-            sandbox: Sandbox(rootURL: dir),
+            sandboxes: [Sandbox(rootURL: dir)],
             pool: pool,
             configuration: config
         )
@@ -227,7 +227,7 @@ struct TestExecutionStageTests {
         )
         let context = TestExecutionContext(
             artifact: makeBuildArtifact(in: dir),
-            sandbox: Sandbox(rootURL: dir),
+            sandboxes: [Sandbox(rootURL: dir)],
             pool: pool,
             configuration: makeRunnerConfiguration()
         )
@@ -306,8 +306,11 @@ struct TestExecutionStageTests {
             )
         )
         let context = TestExecutionContext(
-            artifact: BuildArtifact(derivedDataPath: dir.path, xctestrunURL: nil, plist: nil),
-            sandbox: Sandbox(rootURL: dir),
+            artifact: BuildArtifact(
+                derivedDataPath: dir.path, xctestrunURL: nil, plist: nil,
+                testBundlePaths: [".build/debug/MyLibTests.xctest"]
+            ),
+            sandboxes: [Sandbox(rootURL: dir)],
             pool: pool,
             configuration: config
         )
@@ -327,10 +330,8 @@ struct TestExecutionStageTests {
         #expect(results.first?.status == .survived)
     }
 
-    @Test(
-        "Given SPM launcher throws, when execute called, then pool slot is released and error propagated"
-    )
-    func spmLaunchThrowsReleasesSlotAndPropagates() async throws {
+    @Test("Given SPM launcher throws, when execute called, then error is propagated")
+    func spmLaunchThrowsPropagatesError() async throws {
         let dir = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(dir) }
 
@@ -346,8 +347,11 @@ struct TestExecutionStageTests {
         )
         let config = makeRunnerConfiguration(projectType: .spm)
         let context = TestExecutionContext(
-            artifact: BuildArtifact(derivedDataPath: dir.path, xctestrunURL: nil, plist: nil),
-            sandbox: Sandbox(rootURL: dir),
+            artifact: BuildArtifact(
+                derivedDataPath: dir.path, xctestrunURL: nil, plist: nil,
+                testBundlePaths: [".build/debug/MyLibTests.xctest"]
+            ),
+            sandboxes: [Sandbox(rootURL: dir)],
             pool: pool,
             configuration: config
         )
@@ -386,8 +390,8 @@ struct TestExecutionStageTests {
             )
         )
         let context = TestExecutionContext(
-            artifact: BuildArtifact(derivedDataPath: dir.path, xctestrunURL: nil, plist: plist),
-            sandbox: Sandbox(rootURL: dir),
+            artifact: BuildArtifact(derivedDataPath: dir.path, xctestrunURL: nil, plist: plist, testBundlePaths: []),
+            sandboxes: [Sandbox(rootURL: dir)],
             pool: pool,
             configuration: makeRunnerConfiguration()
         )

@@ -18,7 +18,9 @@ struct PathRelativizerTests {
         #expect(result == "Tests/FooTests.swift")
     }
 
-    @Test("Given a sibling directory sharing root's name as a prefix, when relativePath called, then the path is returned unchanged")
+    @Test(
+        "Given a sibling directory sharing root's name as a prefix, when relativePath called, then the path is returned unchanged"
+    )
     func relativePathDoesNotTreatSiblingAsDescendant() throws {
         let root = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(root) }

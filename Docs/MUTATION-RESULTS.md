@@ -148,7 +148,7 @@ This is the most important internal distinction in how the tool operates. It dir
 
 Running one full build + test cycle per mutant would make mutation testing impractically slow for any real project. For a project with 200 mutants and a 20-second build, a naive approach would take over an hour just in build time.
 
-The tool avoids this by **schematization**: rewriting source files to embed all mutations at once behind a runtime switch, building the project a single time, and then activating one mutant per test run by setting an environment variable. This reduces the total build cost to a single build regardless of the number of mutants. This works for both Xcode projects (`xcodebuild build-for-testing` / `test-without-building`) and SPM packages (`swift build --build-tests` / `swift test --skip-build`).
+The tool avoids this by **schematization**: rewriting source files to embed all mutations at once behind a runtime switch, building the project a single time, and then activating one mutant per test run by setting an environment variable. This reduces the total build cost to a single build regardless of the number of mutants. This works for both Xcode projects (`xcodebuild build-for-testing` / `test-without-building`) and SPM packages (`swift build --build-tests`, then running the built `.xctest` bundles with `xcrun xctest`).
 
 ```swift
 // Original source
@@ -216,7 +216,7 @@ In all of these cases, the mutation site is not inside any executable scope that
 | | Schematizable | Incompatible |
 |---|---|---|
 | Builds required | 1 (shared) | 1 per mutant (Xcode) or shared sandbox (SPM) |
-| Test command | `test-without-building` (Xcode) / `swift test --skip-build` (SPM) | full build + test per mutant |
+| Test command | `test-without-building` (Xcode) / `xcrun xctest <bundle>` (SPM) | full build + test per mutant |
 | Parallel execution | yes, N workers | sequential |
 | Typical cost | seconds per mutant | full build + test per mutant |
 

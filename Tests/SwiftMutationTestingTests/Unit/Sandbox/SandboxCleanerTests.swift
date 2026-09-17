@@ -168,8 +168,8 @@ struct SandboxCleanerTests {
         SandboxCleaner.deregister()
     }
 
-    @Test("Given registered sandbox, when cleanupActiveSandbox called, then sandbox directory is removed")
-    func cleanupActiveSandboxRemovesRegisteredDirectory() throws {
+    @Test("Given registered sandbox, when cleanupActiveSandboxes called, then sandbox directory is removed")
+    func cleanupActiveSandboxesRemovesRegisteredDirectory() throws {
         let baseDir = try FileHelpers.makeTemporaryDirectory()
         let sandboxDir = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
@@ -180,19 +180,19 @@ struct SandboxCleanerTests {
 
         let sandbox = Sandbox(rootURL: sandboxDir)
         SandboxCleaner.register(sandbox)
-        SandboxCleaner.cleanupActiveSandbox()
+        SandboxCleaner.cleanupActiveSandboxes()
 
         #expect(!FileManager.default.fileExists(atPath: sandboxDir.path))
         FileHelpers.cleanup(baseDir)
     }
 
-    @Test("Given no registered sandbox, when cleanupActiveSandbox called, then no error occurs")
-    func cleanupActiveSandboxWithoutRegistrationIsNoOp() {
+    @Test("Given no registered sandbox, when cleanupActiveSandboxes called, then no error occurs")
+    func cleanupActiveSandboxesWithoutRegistrationIsNoOp() {
         SandboxCleaner.deregister()
-        SandboxCleaner.cleanupActiveSandbox()
+        SandboxCleaner.cleanupActiveSandboxes()
     }
 
-    @Test("Given registered sandbox, when deregister called, then cleanupActiveSandbox does not remove directory")
+    @Test("Given registered sandbox, when deregister called, then cleanupActiveSandboxes does not remove directory")
     func deregisterPreventsCleanup() throws {
         let baseDir = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(baseDir) }
@@ -203,13 +203,13 @@ struct SandboxCleanerTests {
         let sandbox = Sandbox(rootURL: sandboxDir)
         SandboxCleaner.register(sandbox)
         SandboxCleaner.deregister()
-        SandboxCleaner.cleanupActiveSandbox()
+        SandboxCleaner.cleanupActiveSandboxes()
 
         #expect(FileManager.default.fileExists(atPath: sandboxDir.path))
     }
 
-    @Test("Given registered sandbox, when register called again, then new sandbox is tracked")
-    func registerOverwritesPreviousRegistration() throws {
+    @Test("Given several registered sandboxes, when cleanupActiveSandboxes called, then all of them are removed")
+    func everyRegisteredSandboxIsCleanedUp() throws {
         let baseDir = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(baseDir) }
 
@@ -220,9 +220,9 @@ struct SandboxCleanerTests {
 
         SandboxCleaner.register(Sandbox(rootURL: first))
         SandboxCleaner.register(Sandbox(rootURL: second))
-        SandboxCleaner.cleanupActiveSandbox()
+        SandboxCleaner.cleanupActiveSandboxes()
 
-        #expect(FileManager.default.fileExists(atPath: first.path))
+        #expect(!FileManager.default.fileExists(atPath: first.path))
         #expect(!FileManager.default.fileExists(atPath: second.path))
     }
 

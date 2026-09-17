@@ -76,6 +76,31 @@ struct SandboxFactory: Sendable {
         return Sandbox(rootURL: sandboxURL)
     }
 
+    /// Copies an existing sandbox, build products included, into a sandbox root of its own, so a
+    /// worker runs the built test bundles from a working directory and a build directory no other
+    /// worker touches. Frameworks a bundle links dynamically still load from the sandbox that
+    /// built them — SwiftPM bakes that directory into the bundle as an absolute rpath — which is
+    /// harmless here: the code is identical and the mutant is selected at runtime through the
+    /// environment. Symlinked project files stay symlinks, and the copy claims the new root's
+    /// owner pid rather than inheriting the source's.
+    func replicate(_ sandbox: Sandbox) throws -> Sandbox {
+        let sandboxURL = try makeSandboxRoot()
+
+        let items = try FileManager.default.contentsOfDirectory(
+            at: sandbox.rootURL,
+            includingPropertiesForKeys: nil
+        )
+
+        for item in items where item.lastPathComponent != Self.ownerPidFileName {
+            try FileManager.default.copyItem(
+                at: item,
+                to: sandboxURL.appendingPathComponent(item.lastPathComponent)
+            )
+        }
+
+        return Sandbox(rootURL: sandboxURL)
+    }
+
     /// Creates a sandbox root and records its owner pid under the sandbox lock, so a concurrent
     /// sweep cannot see the directory before it is claimed.
     func makeSandboxRoot(in directory: URL = FileManager.default.temporaryDirectory) throws -> URL {

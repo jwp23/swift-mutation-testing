@@ -34,7 +34,9 @@ struct SandboxCreationSweepRaceTests {
         #expect(FileManager.default.fileExists(atPath: pidFile.path))
     }
 
-    @Test("Given the sandbox lock cannot be acquired, when makeSandboxRoot is called, then it throws rather than creating an unlocked sandbox")
+    @Test(
+        "Given the sandbox lock cannot be acquired, when makeSandboxRoot is called, then it throws rather than creating an unlocked sandbox"
+    )
     func makeSandboxRootThrowsWhenLockCannotBeAcquired() throws {
         let baseDir = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(baseDir) }
@@ -49,7 +51,9 @@ struct SandboxCreationSweepRaceTests {
         }
     }
 
-    @Test("Given the sandbox lock cannot be acquired, when removeOrphaned is called, then the sweep is skipped without crashing")
+    @Test(
+        "Given the sandbox lock cannot be acquired, when removeOrphaned is called, then the sweep is skipped without crashing"
+    )
     func removeOrphanedSkipsSweepWhenLockCannotBeAcquired() throws {
         let baseDir = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(baseDir) }
