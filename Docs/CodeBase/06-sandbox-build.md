@@ -199,6 +199,7 @@ enum BuildError: Error, Equatable, LocalizedError {
     case compilationFailed(output: String)
     case xctestrunNotFound
     case testBundleNotFound
+    case testTargetUnscopable(testTarget: String)
 
     var errorDescription: String? { get }
 }
@@ -210,6 +211,8 @@ Conforms to `LocalizedError` to provide structured error descriptions that propa
 |---|---|---|
 | `compilationFailed(output:)` | Build exits with non-zero code | Caught by `MutantExecutor`; triggers `FallbackExecutor` |
 | `xctestrunNotFound` | No `.xctestrun` in `Build/Products`, or plist parse failure | Propagates; fatal |
+| `testBundleNotFound` | No `.xctest` bundle found after an SPM build | Propagates; fatal |
+| `testTargetUnscopable(testTarget:)` | A configured `--target` matched no test bundle — the SwiftPM toolchain merged every test target into one bundle, leaving nothing narrower to select | Propagates; fatal — see [Execution § BundleSelection](07-execution.md) |
 
 ---
 

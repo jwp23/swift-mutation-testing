@@ -66,13 +66,35 @@ Bundle of shared collaborators passed between `MutantExecutor` and the stage typ
 
 ---
 
+## Execution/LikelyKillerTestMapping.swift
+
+```swift
+struct LikelyKillerTestMapping: Sendable {
+    let overrides: [String: [String]]
+
+    func conventionalTestFileName(forSourceFile sourceFilePath: String) -> String
+    func overriddenTestFileNames(forSourceFile sourceFilePath: String) -> [String]?
+    func sourceFilePaths(forTestFile testFilePath: String) -> [String]
+}
+```
+
+The pairing between a source file and the test files most likely to kill its mutants: the `Foo.swift` → `FooTests.swift` naming convention, plus the configured `likelyKillerTests` overrides for sources the convention does not cover. Read forwards (`conventionalTestFileName`/`overriddenTestFileNames`) by `LikelyKillerTestSelector` to choose the tests to run first against a mutant, and backwards (`sourceFilePaths(forTestFile:)`) by `ScopeResolver` to decide which sources a changed test file puts in scope — see [Discovery Pipeline § Scope Resolution](03-discovery-pipeline.md#scope-resolution).
+
+| Method | Description |
+|---|---|
+| `conventionalTestFileName(forSourceFile:)` | The `FooTests.swift` name the convention pairs with a source, whether or not the project actually contains such a file |
+| `overriddenTestFileNames(forSourceFile:)` | The configured `overrides` entry whose key is the longest suffix match of the source path, so a directory-scoped override beats a bare-file-name one; `nil` if no key matches |
+| `sourceFilePaths(forTestFile:)` | Sources a test file is the likely killer for, read backwards: the convention's bare source file name, derived unconditionally by stripping the `Tests.swift` suffix, plus every `overrides` key whose value names that test file (matched by file name or by class name) |
+
+Backwards, a source is offered whenever *either* rule pairs it with the test — a scope that misses a source lets a weakened test pass unexamined, while one that includes a source too many only runs mutants that would have run anyway.
+
+---
+
 ## Execution/LikelyKillerTestSelector.swift
 
 ```swift
 struct LikelyKillerTestSelector: Sendable {
     init(testFilePaths: [String], overrides: [String: [String]])
-
-    let overrides: [String: [String]]
 
     func selection(forSourceFile sourceFilePath: String) -> String?
 }
@@ -80,13 +102,16 @@ struct LikelyKillerTestSelector: Sendable {
 
 Names the tests an SPM mutant runs before the whole suite. `Foo.swift` is covered by
 `FooTests.swift` unless `likely-killer-tests` in the configuration file maps that source onto
-other test files; the result is the XCTest selection naming those test classes, or `nil` when the
-source has no such test file and only the whole suite can judge its mutants.
+other test files (both resolved via `LikelyKillerTestMapping`, held privately); the result is the
+XCTest selection naming those test classes. Configured override names are used as provided,
+without checking that they exist or declare an `XCTestCase` subclass; the result is `nil` only
+when there is no override and no reachable conventional match, leaving only the whole suite to
+judge the mutant.
 
-| Parameter / Field | Description |
+| Parameter | Description |
 |---|---|
-| `testFilePaths` | Every test file collected from the project. Read once at init: only those declaring an `XCTestCase` subclass can be selected, since an XCTest selection reaches nothing in a Swift Testing suite |
-| `overrides` | Configured test files per source path suffix; the longest matching key wins, and configured names are used as written |
+| `testFilePaths` | Every test file collected from the project. Read once at init to build the XCTest filter: conventional matches are kept only when they pass the `XCTestCase` check; configured override names bypass this filter and are used as provided |
+| `overrides` | Configured test files per source path suffix, forwarded to the `LikelyKillerTestMapping` the selector holds internally; not a stored property on the selector itself |
 
 ---
 

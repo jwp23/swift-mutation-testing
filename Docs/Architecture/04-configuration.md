@@ -63,7 +63,8 @@ RunnerConfiguration
 │   ├── timeout           — per-mutant test timeout (Xcode default: 120s, SPM default: 30s)
 │   ├── concurrency       — parallel workers (default: ProcessInfo.processorCount - 1)
 │   ├── noCache           — disable result caching (default: false)
-│   └── testingFramework  — TestingFramework (.xctest or .swiftTesting, default: .swiftTesting)
+│   ├── testingFramework  — TestingFramework (.xctest or .swiftTesting, default: .swiftTesting)
+│   └── likelyKillerTests — source path → likely-killer test file names (config-file-only, default: [:])
 ├── reporting: ReportingOptions
 │   ├── output            — path for JSON report (optional)
 │   ├── htmlOutput        — path for HTML report (optional)
@@ -72,8 +73,13 @@ RunnerConfiguration
 └── filter: FilterOptions
     ├── sourcesPath       — root directory for source file discovery (default: projectPath)
     ├── excludePatterns   — glob patterns for files to exclude
-    └── operators         — active mutation operator identifiers
+    ├── operators         — active mutation operator identifiers
+    ├── scopeLines        — "path:start-end" line sets the run is limited to (CLI-only, default: [])
+    ├── since             — git reference whose diff against the working tree limits the run (CLI-only)
+    └── baselineReport    — earlier full run's report, read to find mutants a changed test killed (CLI-only)
 ```
+
+`scopeLines`, `since`, and `baselineReport` feed `ScopeResolver`, which runs once before the discovery pipeline and produces the `MutantScope?` that limits which mutants discovery keeps — see [Discovery Pipeline § ScopeFilterStage](02-discovery.md#scopefilterstage) and its [CodeBase reference](../CodeBase/03-discovery-pipeline.md#scope-resolution).
 
 ### ProjectType
 
@@ -110,8 +116,10 @@ OPTIONS:
   --destination <destination>   xcodebuild destination specifier (required)
   --target <test-target>        Limit test execution to this target
   --timeout <seconds>           Per-mutant test timeout (default: 60)
+  --build-timeout <seconds>     Bounds the schematized build only (default: 600)
   --concurrency <n>             Parallel workers (default: CPUs - 1)
   --no-cache                    Disable result caching
+  --testing-framework <value>   Target's test framework: xctest or swift-testing
   --output <json-path>          Write JSON report to path
   --html-output <html-path>     Write HTML report to path
   --sonar-output <json-path>    Write Sonar report to path
@@ -120,9 +128,14 @@ OPTIONS:
   --exclude <pattern>           Exclude files matching pattern (repeatable)
   --operator <id>               Active mutation operator (repeatable, default: all)
   --disable-mutator <id>        Disable a mutation operator (repeatable)
+  --scope-lines <path:start-end> Limit the run to these lines (repeatable)
+  --since <git-ref>             Limit the run to the diff against this git reference
+  --baseline-report <path>      Earlier full run's report, to re-test mutants a changed test killed
   --version                     Print version and exit
   --help                        Print usage and exit
 ```
+
+`likely-killer-tests` (the source-to-test-file overrides `LikelyKillerTestMapping` and `LikelyKillerTestSelector` read) is configuration-file-only — there is no corresponding CLI flag.
 
 ## Resolution Order
 
