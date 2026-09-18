@@ -96,6 +96,7 @@ enum SandboxCleaner {
     static func register(_ sandbox: Sandbox)
     static func deregister()
     static func installSignalHandlers()
+    static func cleanUpOnSignalNotification(from descriptor: Int32)
 }
 ```
 
@@ -104,11 +105,12 @@ Handles cleanup of orphaned and active sandbox directories.
 | Method | Description |
 |---|---|
 | `removeOrphaned(in:)` | Scans the directory for `xmr-*` entries and removes those whose `.owner-pid` names a process that is no longer running. Called once at startup to clean up sandboxes from interrupted runs, leaving concurrent runs' sandboxes intact. An entry with no readable pid record is treated as orphaned |
-| `register(_:)` | Adds the sandbox root path to the list of C pointers accessible to signal handlers |
-| `deregister()` | Clears every stored path and deallocates the pointers |
-| `installSignalHandlers()` | Installs `SIGINT` and `SIGTERM` handlers that remove the active sandboxes and call `_exit(1)` |
+| `register(_:)` | Adds the sandbox root to the registry the signal cleanup removes |
+| `deregister()` | Empties the registry without removing anything, for sandboxes the run has already cleaned up itself |
+| `installSignalHandlers()` | Creates the notification pipe, starts the watcher thread and installs `SIGINT`/`SIGTERM` handlers; a repeat call keeps what is already in place |
+| `cleanUpOnSignalNotification(from:)` | The watcher loop: blocks on the pipe, then removes the active sandboxes and calls `_exit(1)` in ordinary context |
 
-The active sandbox paths are stored as `nonisolated(unsafe)` `UnsafeMutablePointer<CChar>` values at module scope — necessary because C signal handlers cannot capture Swift context. A run registers one sandbox per worker, so `cleanupActiveSandboxes()` removes all of them. `register`/`deregister` are called sequentially from `MutantExecutor.execute`, so no concurrent access occurs during normal operation.
+The registry is a `nonisolated(unsafe)` module-scope array of sandbox roots — module scope because C signal handlers cannot capture Swift context — and every access goes through an `NSLock`. The signal handler never takes that lock and never touches the array: it writes a single byte to a self-pipe, which is async-signal-safe, and the watcher thread reading the pipe does the `FileManager` work. `register`/`deregister` are called from `MutantExecutor.execute`, and the watcher can run at any moment, so the lock is what keeps a signal arriving mid-registration from tearing the array.
 
 ---
 

@@ -3,10 +3,56 @@ import Testing
 
 @testable import SwiftMutationTesting
 
-nonisolated(unsafe) private var capturedExitCode: Int32?
+private let exitRecordLock = NSLock()
+nonisolated(unsafe) private var capturedExitCodes: [Int32] = []
 
+/// The watcher thread calls this, so the record it writes is read back under the same lock.
 private func stubExitHandler(_ code: Int32) {
-    capturedExitCode = code
+    exitRecordLock.lock()
+    capturedExitCodes.append(code)
+    exitRecordLock.unlock()
+}
+
+private func recordedExitCodes() -> [Int32] {
+    exitRecordLock.lock()
+    defer { exitRecordLock.unlock() }
+
+    return capturedExitCodes
+}
+
+private func resetRecordedExitCodes() {
+    exitRecordLock.lock()
+    capturedExitCodes = []
+    exitRecordLock.unlock()
+}
+
+/// Waits for the watcher thread to record `count` exit codes, giving up after `timeout` seconds so
+/// a handler that never fires fails the expectation instead of hanging the suite.
+private func waitForRecordedExitCodes(count: Int, timeout: TimeInterval = 5) -> [Int32] {
+    let deadline = Date().addingTimeInterval(timeout)
+
+    while Date() < deadline {
+        let codes = recordedExitCodes()
+        if codes.count >= count { return codes }
+        usleep(1000)
+    }
+
+    return recordedExitCodes()
+}
+
+/// A notification pipe primed with `notifications` bytes and closed for writing, so
+/// `cleanUpOnSignalNotification` handles exactly those and then returns instead of blocking.
+private func makePrimedNotificationPipe(notifications: Int) -> Int32 {
+    var descriptors: [Int32] = [-1, -1]
+    _ = pipe(&descriptors)
+
+    for _ in 0 ..< notifications {
+        var notification: UInt8 = 1
+        _ = write(descriptors[1], &notification, 1)
+    }
+    close(descriptors[1])
+
+    return descriptors[0]
 }
 
 @Suite("SandboxCleaner")
@@ -226,12 +272,15 @@ struct SandboxCleanerTests {
         #expect(!FileManager.default.fileExists(atPath: second.path))
     }
 
-    @Test("Given registered sandbox, when handleSignal fires, then sandbox is removed and exit handler called with 1")
-    func handleSignalCleansSandboxAndExits() throws {
+    @Test(
+        "Given registered sandbox, when the installed handler fires, then sandbox is removed and exit handler called with 1",
+        arguments: [SIGINT, SIGTERM]
+    )
+    func installedHandlerCleansSandboxAndExits(signalNumber: Int32) throws {
         let baseDir = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(baseDir) }
 
-        let sandboxDir = baseDir.appendingPathComponent("xmr-signal-test")
+        let sandboxDir = baseDir.appendingPathComponent("xmr-signal-\(signalNumber)")
         try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
         try "content".write(
             to: sandboxDir.appendingPathComponent("file.swift"),
@@ -239,46 +288,107 @@ struct SandboxCleanerTests {
         )
 
         SandboxCleaner.register(Sandbox(rootURL: sandboxDir))
-        SandboxCleaner.installSignalHandlers()
-        defer {
-            signal(SIGINT, SIG_DFL)
-            signal(SIGTERM, SIG_DFL)
-            SandboxCleaner.deregister()
-        }
-
-        let handler = signal(SIGINT, SIG_DFL)!
-        signal(SIGINT, handler)
+        defer { SandboxCleaner.deregister() }
 
         let previousExit = sandboxCleanerExitHandler
-        capturedExitCode = nil
+        resetRecordedExitCodes()
         sandboxCleanerExitHandler = stubExitHandler
         defer { sandboxCleanerExitHandler = previousExit }
 
-        handler(SIGINT)
+        installedHandler(for: signalNumber)(signalNumber)
 
+        #expect(waitForRecordedExitCodes(count: 1) == [1])
         #expect(!FileManager.default.fileExists(atPath: sandboxDir.path))
-        #expect(capturedExitCode == 1)
     }
 
-    @Test("Given no registered sandbox, when handleSignal fires, then exit handler called with 1")
-    func handleSignalWithNoSandboxStillExits() {
+    @Test("Given no registered sandbox, when the installed handler fires, then exit handler is called with 1")
+    func installedHandlerWithNoSandboxStillExits() {
         SandboxCleaner.deregister()
-        SandboxCleaner.installSignalHandlers()
-        defer {
-            signal(SIGINT, SIG_DFL)
-            signal(SIGTERM, SIG_DFL)
-        }
-
-        let handler = signal(SIGINT, SIG_DFL)!
-        signal(SIGINT, handler)
 
         let previousExit = sandboxCleanerExitHandler
-        capturedExitCode = nil
+        resetRecordedExitCodes()
         sandboxCleanerExitHandler = stubExitHandler
         defer { sandboxCleanerExitHandler = previousExit }
 
-        handler(SIGINT)
+        installedHandler(for: SIGINT)(SIGINT)
 
-        #expect(capturedExitCode == 1)
+        #expect(waitForRecordedExitCodes(count: 1) == [1])
+    }
+
+    @Test(
+        "Given a notification on the pipe, when the watcher drains it, then sandboxes are removed and exit handler called with 1"
+    )
+    func signalNotificationDrivesCleanupAndExit() throws {
+        let baseDir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(baseDir) }
+
+        let sandboxDir = baseDir.appendingPathComponent("xmr-notified")
+        try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
+        SandboxCleaner.register(Sandbox(rootURL: sandboxDir))
+        defer { SandboxCleaner.deregister() }
+
+        let previousExit = sandboxCleanerExitHandler
+        resetRecordedExitCodes()
+        sandboxCleanerExitHandler = stubExitHandler
+        defer { sandboxCleanerExitHandler = previousExit }
+
+        let reader = makePrimedNotificationPipe(notifications: 1)
+        defer { close(reader) }
+        SandboxCleaner.cleanUpOnSignalNotification(from: reader)
+
+        #expect(recordedExitCodes() == [1])
+        #expect(!FileManager.default.fileExists(atPath: sandboxDir.path))
+    }
+
+    @Test(
+        "Given no notification before the pipe closes, when the watcher drains it, then nothing is cleaned up and no exit is requested"
+    )
+    func closedNotificationPipeWithoutNotificationDoesNothing() throws {
+        let baseDir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(baseDir) }
+
+        let sandboxDir = baseDir.appendingPathComponent("xmr-unnotified")
+        try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
+        SandboxCleaner.register(Sandbox(rootURL: sandboxDir))
+        defer { SandboxCleaner.deregister() }
+
+        let previousExit = sandboxCleanerExitHandler
+        resetRecordedExitCodes()
+        sandboxCleanerExitHandler = stubExitHandler
+        defer { sandboxCleanerExitHandler = previousExit }
+
+        let reader = makePrimedNotificationPipe(notifications: 0)
+        defer { close(reader) }
+        SandboxCleaner.cleanUpOnSignalNotification(from: reader)
+
+        #expect(recordedExitCodes().isEmpty)
+        #expect(FileManager.default.fileExists(atPath: sandboxDir.path))
+    }
+
+    @Test("Given a second notification, when the watcher drains it, then it is answered too")
+    func watcherAnswersEveryNotification() {
+        SandboxCleaner.deregister()
+
+        let previousExit = sandboxCleanerExitHandler
+        resetRecordedExitCodes()
+        sandboxCleanerExitHandler = stubExitHandler
+        defer { sandboxCleanerExitHandler = previousExit }
+
+        let reader = makePrimedNotificationPipe(notifications: 2)
+        defer { close(reader) }
+        SandboxCleaner.cleanUpOnSignalNotification(from: reader)
+
+        #expect(recordedExitCodes() == [1, 1])
+    }
+
+    /// The handler `installSignalHandlers` put in place, read back from the process disposition
+    /// and restored. Calling it is the closest a test can get to the signal arriving without
+    /// actually interrupting the test process.
+    private func installedHandler(for signalNumber: Int32) -> @convention(c) (Int32) -> Void {
+        SandboxCleaner.installSignalHandlers()
+        let handler = signal(signalNumber, SIG_DFL)!
+        signal(signalNumber, handler)
+
+        return handler
     }
 }
