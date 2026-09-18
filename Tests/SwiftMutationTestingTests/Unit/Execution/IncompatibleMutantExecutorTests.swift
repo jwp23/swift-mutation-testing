@@ -443,4 +443,217 @@ struct IncompatibleMutantExecutorTests {
 
         #expect(results.first?.status == .unviable)
     }
+
+    @Test(
+        "Given no testTarget and a likely-killer selection, when execute called, then filter uses the pipe-joined selection"
+    )
+    func spmNoTestTargetUsesLikelyKillerFilter() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let sourceFile = dir.appendingPathComponent("Foo.swift")
+        try "let x = true".write(to: sourceFile, atomically: true, encoding: .utf8)
+
+        let launcher = RecordingProcessLauncher()
+        let executor = makeIncompatibleMutantExecutorSPM(
+            in: dir,
+            launcher: launcher,
+            likelyKillerTests: [sourceFile.path: ["FooTests.swift", "BarTests.swift"]]
+        )
+        let pool = makeSimulatorPool()
+        try await pool.setUp()
+
+        let mutant = makeMutantDescriptor(
+            id: "m0",
+            filePath: sourceFile.path,
+            originalText: "a + b",
+            mutatedText: "a - b",
+            operatorIdentifier: "binaryOperator",
+            description: "Replace + with -",
+            mutatedSourceContent: "let x = 1"
+        )
+
+        _ = try await executor.execute(
+            [mutant],
+            configuration: makeRunnerConfiguration(projectPath: dir.path, projectType: .spm),
+            pool: pool
+        )
+
+        let requests = await launcher.requests
+        #expect(requests.last?.arguments == ["test", "--skip-build", "--filter", "\\.(?:FooTests|BarTests)/"])
+    }
+
+    @Test(
+        "Given a likely-killer class name with regex-special characters, when execute called, then the filter escapes each name"
+    )
+    func spmLikelyKillerFilterEscapesRegexSpecialCharacters() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let sourceFile = dir.appendingPathComponent("Foo+Extensions.swift")
+        try "let x = true".write(to: sourceFile, atomically: true, encoding: .utf8)
+
+        let launcher = RecordingProcessLauncher()
+        let executor = makeIncompatibleMutantExecutorSPM(
+            in: dir,
+            launcher: launcher,
+            likelyKillerTests: [sourceFile.path: ["Foo+ExtensionsTests.swift", "Bar.Tests.swift"]]
+        )
+        let pool = makeSimulatorPool()
+        try await pool.setUp()
+
+        let mutant = makeMutantDescriptor(
+            id: "m0",
+            filePath: sourceFile.path,
+            originalText: "a + b",
+            mutatedText: "a - b",
+            operatorIdentifier: "binaryOperator",
+            description: "Replace + with -",
+            mutatedSourceContent: "let x = 1"
+        )
+
+        _ = try await executor.execute(
+            [mutant],
+            configuration: makeRunnerConfiguration(projectPath: dir.path, projectType: .spm),
+            pool: pool
+        )
+
+        let requests = await launcher.requests
+        let escapedSelection = [
+            NSRegularExpression.escapedPattern(for: "Foo+ExtensionsTests"),
+            NSRegularExpression.escapedPattern(for: "Bar.Tests"),
+        ].joined(separator: "|")
+        let expectedFilter = "\\.(?:\(escapedSelection))/"
+
+        #expect(requests.last?.arguments == ["test", "--skip-build", "--filter", expectedFilter])
+
+        // The escaped filter must still match its own literal class name's specifier, unescaped would not.
+        let regex = try NSRegularExpression(pattern: expectedFilter)
+        let specifier = "MyPackageTests.Foo+ExtensionsTests/testSomething"
+        let range = NSRange(location: 0, length: (specifier as NSString).length)
+        #expect(regex.firstMatch(in: specifier, range: range) != nil)
+    }
+
+    @Test(
+        "Given a likely-killer class name, when execute called, then the filter does not match an unrelated specifier that merely contains it"
+    )
+    func spmLikelyKillerFilterDoesNotMatchSubstringCollisions() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let sourceFile = dir.appendingPathComponent("Foo.swift")
+        try "let x = true".write(to: sourceFile, atomically: true, encoding: .utf8)
+
+        let launcher = RecordingProcessLauncher()
+        let executor = makeIncompatibleMutantExecutorSPM(
+            in: dir,
+            launcher: launcher,
+            likelyKillerTests: [sourceFile.path: ["FooTests.swift"]]
+        )
+        let pool = makeSimulatorPool()
+        try await pool.setUp()
+
+        let mutant = makeMutantDescriptor(
+            id: "m0",
+            filePath: sourceFile.path,
+            originalText: "a + b",
+            mutatedText: "a - b",
+            operatorIdentifier: "binaryOperator",
+            description: "Replace + with -",
+            mutatedSourceContent: "let x = 1"
+        )
+
+        _ = try await executor.execute(
+            [mutant],
+            configuration: makeRunnerConfiguration(projectPath: dir.path, projectType: .spm),
+            pool: pool
+        )
+
+        let requests = await launcher.requests
+        let filter = try #require(requests.last?.arguments.last)
+        let regex = try NSRegularExpression(pattern: filter)
+
+        func matches(_ specifier: String) -> Bool {
+            let range = NSRange(location: 0, length: (specifier as NSString).length)
+            return regex.firstMatch(in: specifier, range: range) != nil
+        }
+
+        // A specifier naming exactly the likely-killer class must match.
+        #expect(matches("MyPackageTests.FooTests/testSomething"))
+        // Specifiers whose class name merely contains "FooTests" as a substring must not.
+        #expect(!matches("MyPackageTests.MyFooTestsHelper/testSomething"))
+        #expect(!matches("MyPackageTests.MyFooTests/testSomething"))
+    }
+
+    @Test("Given no testTarget and no likely-killer selection, when execute called, then no filter is added")
+    func spmNoTestTargetAndNoLikelyKillerSelectionRunsWholeSuite() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let sourceFile = dir.appendingPathComponent("Foo.swift")
+        try "let x = true".write(to: sourceFile, atomically: true, encoding: .utf8)
+
+        let launcher = RecordingProcessLauncher()
+        let executor = makeIncompatibleMutantExecutorSPM(in: dir, launcher: launcher)
+        let pool = makeSimulatorPool()
+        try await pool.setUp()
+
+        let mutant = makeMutantDescriptor(
+            id: "m0",
+            filePath: sourceFile.path,
+            originalText: "a + b",
+            mutatedText: "a - b",
+            operatorIdentifier: "binaryOperator",
+            description: "Replace + with -",
+            mutatedSourceContent: "let x = 1"
+        )
+
+        _ = try await executor.execute(
+            [mutant],
+            configuration: makeRunnerConfiguration(projectPath: dir.path, projectType: .spm),
+            pool: pool
+        )
+
+        let requests = await launcher.requests
+        #expect(requests.last?.arguments == ["test", "--skip-build"])
+    }
+
+    @Test(
+        "Given a configured testTarget and a likely-killer selection, when execute called, then the testTarget filter wins"
+    )
+    func spmTestTargetTakesPrecedenceOverLikelyKillerSelection() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let sourceFile = dir.appendingPathComponent("Foo.swift")
+        try "let x = true".write(to: sourceFile, atomically: true, encoding: .utf8)
+
+        let launcher = RecordingProcessLauncher()
+        let executor = makeIncompatibleMutantExecutorSPM(
+            in: dir,
+            launcher: launcher,
+            likelyKillerTests: [sourceFile.path: ["FooTests.swift"]]
+        )
+        let pool = makeSimulatorPool()
+        try await pool.setUp()
+
+        let mutant = makeMutantDescriptor(
+            id: "m0",
+            filePath: sourceFile.path,
+            originalText: "a + b",
+            mutatedText: "a - b",
+            operatorIdentifier: "binaryOperator",
+            description: "Replace + with -",
+            mutatedSourceContent: "let x = 1"
+        )
+
+        _ = try await executor.execute(
+            [mutant],
+            configuration: makeRunnerConfiguration(projectPath: dir.path, projectType: .spm, testTarget: "AppTests"),
+            pool: pool
+        )
+
+        let requests = await launcher.requests
+        #expect(requests.last?.arguments == ["test", "--skip-build", "--filter", "AppTests"])
+    }
 }

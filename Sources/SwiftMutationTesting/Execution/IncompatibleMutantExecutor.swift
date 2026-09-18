@@ -158,6 +158,13 @@ struct IncompatibleMutantExecutor: Sendable {
         var testArgs = ["test", "--skip-build"]
         if let testTarget = configuration.build.testTarget {
             testArgs += ["--filter", testTarget]
+        } else if let selection = deps.likelyKillerTestSelector.selection(forSourceFile: mutant.filePath) {
+            let escapedSelection =
+                selection
+                .split(separator: ",")
+                .map { NSRegularExpression.escapedPattern(for: String($0)) }
+                .joined(separator: "|")
+            testArgs += ["--filter", "\\.(?:\(escapedSelection))/"]
         }
 
         let start = Date()
