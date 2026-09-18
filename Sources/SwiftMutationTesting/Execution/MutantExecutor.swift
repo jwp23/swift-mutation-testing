@@ -84,7 +84,8 @@ struct MutantExecutor: Sendable {
 
     /// Builds the artifact, replicates worker sandboxes and stands up the simulator pool. Any
     /// failure along the way leaves nothing behind: every sandbox registered so far — the build
-    /// sandbox and any worker replicas already created — is removed before the error propagates.
+    /// sandbox and any worker replicas already created — is removed, and any simulator the pool
+    /// managed to clone is torn down, before the error propagates.
     private func prepareExecution(input: RunnerInput, deps: ExecutionDeps) async throws -> ExecutionSetup {
         let sandbox = try await SandboxFactory().create(
             projectPath: input.projectPath,
@@ -93,6 +94,8 @@ struct MutantExecutor: Sendable {
         )
         SandboxCleaner.register(sandbox)
 
+        var pool: SimulatorPool?
+
         do {
             let (artifact, schemaBuildExcluded) = try await buildArtifact(sandbox: sandbox, input: input, deps: deps)
             let sandboxes = try workerSandboxes(
@@ -100,16 +103,18 @@ struct MutantExecutor: Sendable {
                 artifact: artifact,
                 mutantCount: testableSchematizableMutants(in: input, excluding: schemaBuildExcluded).count
             )
-            let pool = try await makePool(launcher: launcher)
-            try await pool.setUp()
+            let createdPool = try await makePool(launcher: launcher)
+            pool = createdPool
+            try await createdPool.setUp()
 
             return ExecutionSetup(
                 artifact: artifact,
                 schemaBuildExcluded: schemaBuildExcluded,
                 sandboxes: sandboxes,
-                pool: pool
+                pool: createdPool
             )
         } catch {
+            await pool?.tearDown()
             SandboxCleaner.cleanupActiveSandboxes()
             throw error
         }

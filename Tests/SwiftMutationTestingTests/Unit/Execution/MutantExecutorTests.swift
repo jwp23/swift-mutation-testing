@@ -21,6 +21,36 @@ struct MutantExecutorTests {
         #expect(results.isEmpty)
     }
 
+    @Test("Given simulator pool setUp throws, when execute called, then pool tearDown runs and deletes tracked clones")
+    func poolSetUpFailureTearsDownTrackedClones() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let listJSON = """
+            {"devices":{"com.apple.runtime.iOS":[
+                {"udid":"BASE-UDID","name":"iPhone 15","state":"Booted"}
+            ]}}
+            """
+        let launcher = PartialCloneFailureLauncher(listJSON: listJSON)
+
+        let executor = MutantExecutor(
+            configuration: makeRunnerConfiguration(
+                projectPath: dir.path,
+                projectType: .xcode(scheme: "MyScheme", destination: "platform=iOS Simulator,name=iPhone 15"),
+                concurrency: 2
+            ),
+            launcher: launcher
+        )
+        let input = makeRunnerInput(projectPath: dir.path)
+
+        await #expect(throws: (any Error).self) {
+            _ = try await executor.execute(input)
+        }
+
+        let deleteCalls = await launcher.recordedArguments.filter { $0.contains("delete") }
+        #expect(deleteCalls.contains { $0.contains("CLONE-0") })
+    }
+
     @Test("Given build failure and schematizable mutants, when execute called, then fallback marks them unviable")
     func buildFailureMakesSchematizableMutantsUnviable() async throws {
         let dir = try FileHelpers.makeTemporaryDirectory()

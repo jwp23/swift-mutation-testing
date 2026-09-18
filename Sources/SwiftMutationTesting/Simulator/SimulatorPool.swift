@@ -21,12 +21,12 @@ actor SimulatorPool {
 
     func setUp() async throws {
         guard let baseUDID else {
-            available = [SimulatorSlot(udid: "", destination: destination)]
+            available = (0 ..< size).map { _ in SimulatorSlot(udid: "", destination: destination) }
             return
         }
 
-        let clones = try await cloneBase(baseUDID)
-        clonedUDIDs = clones
+        try await cloneBase(baseUDID)
+        let clones = clonedUDIDs
         try await bootClones(clones)
 
         let platform =
@@ -35,7 +35,13 @@ actor SimulatorPool {
         available = clones.map { SimulatorSlot(udid: $0, destination: "\(platform),id=\($0)") }
     }
 
-    private func cloneBase(_ base: String) async throws -> [String] {
+    /// Clones the base simulator once per worker, recording every clone that `simctl` actually
+    /// created in `clonedUDIDs` as it lands. That is what gives `tearDown()` something to delete
+    /// instead of leaking simulators when a clone fails: its siblings' simulators already exist,
+    /// or are moments from existing, when the failure surfaces. So a failure is held back until
+    /// every worker has finished and been accounted for, rather than abandoning the ones still
+    /// in flight.
+    private func cloneBase(_ base: String) async throws {
         let launcher = self.launcher
         let size = self.size
         let session = self.sessionID
@@ -47,7 +53,7 @@ actor SimulatorPool {
             timeout: 30
         )
 
-        return try await withThrowingTaskGroup(of: String.self) { group in
+        try await withThrowingTaskGroup(of: String.self) { group in
             for index in 0 ..< size {
                 group.addTask {
                     let result = try await launcher.launchCapturing(
@@ -69,9 +75,18 @@ actor SimulatorPool {
                 }
             }
 
-            var results: [String] = []
-            for try await udid in group { results.append(udid) }
-            return results
+            var cloneFailure: (any Error)?
+
+            while let result = await group.nextResult() {
+                switch result {
+                case .success(let udid):
+                    clonedUDIDs.append(udid)
+                case .failure(let error):
+                    cloneFailure = cloneFailure ?? error
+                }
+            }
+
+            if let cloneFailure { throw cloneFailure }
         }
     }
 
