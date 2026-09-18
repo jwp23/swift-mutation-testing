@@ -195,7 +195,7 @@ struct ScopeResolverTests {
         #expect(
             stderr
                 == "warning: Tests/TestSupport/Fixtures.swift is in scope but maps to no source file and "
-                    + "no --baseline-report was given — its test change was not examined\n"
+                + "no --baseline-report was given — its test change was not examined\n"
         )
     }
 
