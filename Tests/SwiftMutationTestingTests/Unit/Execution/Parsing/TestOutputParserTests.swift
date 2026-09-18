@@ -137,4 +137,62 @@ struct TestOutputParserTests {
 
         #expect(TestOutputParser().failingTest(in: line) == nil)
     }
+
+    @Test(
+        "Given a Swift Testing failure line for a test with no custom display name, when the failing test is read from it, then it names that test's signature"
+    )
+    func namesTheTestAnUnquotedSwiftTestingFailureLineReports() {
+        let line = "✘ Test plainExpectFailure() failed after 0.001 seconds with 1 issue."
+
+        #expect(TestOutputParser().failingTest(in: line) == "plainExpectFailure()")
+    }
+
+    @Test(
+        "Given a Swift Testing rollup failure line for a parameterized test, when the failing test is read from it, then it names that test's signature"
+    )
+    func namesTheParameterizedTestAnUnquotedSwiftTestingRollupLineReports() {
+        let line = "✘ Test parameterized(value:) with 3 test cases failed after 0.001 seconds with 3 issues."
+
+        #expect(TestOutputParser().failingTest(in: line) == "parameterized(value:)")
+    }
+
+    @Test(
+        "Given a Swift Testing per-case issue line for a parameterized test, when the failing test is read from it, then it names nothing"
+    )
+    func namesNothingForASwiftTestingPerCaseIssueLine() {
+        let line =
+            "✘ Test parameterized(value:) recorded an issue with 1 argument value → 2 at FixtureTests.swift:32:9: Expectation failed: value == 0"
+
+        #expect(TestOutputParser().failingTest(in: line) == nil)
+    }
+
+    @Test(
+        "Given a Swift Testing rollup passing line for a parameterized test, when the failing test is read from it, then it names nothing"
+    )
+    func namesNothingForAPassingSwiftTestingRollupLine() {
+        let line = "✔ Test parameterized(value:) with 3 test cases passed after 0.001 seconds."
+
+        #expect(TestOutputParser().failingTest(in: line) == nil)
+    }
+
+    @Test("Given the Swift Testing run-level rollup line, when the failing test is read from it, then it names nothing")
+    func namesNothingForTheSwiftTestingRunRollupLine() {
+        let line = "Test run with 1 test in 1 suite failed after 0.001 seconds with 1 issue."
+
+        #expect(TestOutputParser().failingTest(in: line) == nil)
+    }
+
+    @Test(
+        "Given real SPM swift test output for a Swift Testing failure with no custom display name, when parsed, then returns killed with that test's signature"
+    )
+    func parsesSPMUnnamedSwiftTestingFailureAsKilled() throws {
+        let output = try loadTestFixture("spm_swift_testing_unnamed_failure")
+        let result = TestOutputParser().parse(output)
+
+        guard case .killed(let name) = result else {
+            Issue.record("Expected .killed but got \(result)")
+            return
+        }
+        #expect(name == "plainExpectFailure()")
+    }
 }
