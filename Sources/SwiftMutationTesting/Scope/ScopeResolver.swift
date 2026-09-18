@@ -64,7 +64,17 @@ struct ScopeResolver: Sendable {
         configuration: RunnerConfiguration
     ) -> MutantScope {
         let mapping = LikelyKillerTestMapping(overrides: configuration.build.likelyKillerTests)
-        let sourcePaths = testFilePaths.flatMap { mapping.sourceFilePaths(forTestFile: $0) }
+        let hasBaselineReport = configuration.filter.baselineReport != nil
+
+        let sourcePaths = testFilePaths.flatMap { testFilePath -> [String] in
+            let paths = mapping.sourceFilePaths(forTestFile: testFilePath)
+
+            if paths.isEmpty, !hasBaselineReport {
+                warnUnexaminedTestChange(testFilePath: testFilePath, projectPath: configuration.projectPath)
+            }
+
+            return paths
+        }
 
         return MutantScope(
             lineRangesByPath: Dictionary(
@@ -72,6 +82,17 @@ struct ScopeResolver: Sendable {
                 uniquingKeysWith: { first, _ in first }
             )
         )
+    }
+
+    /// A scoped test file that names no source, with no baseline report to attribute it another
+    /// way, contributes nothing to the run — its change would pass without a single mutant testing
+    /// it. Reported on stderr since it's a warning, not the run's primary output.
+    private func warnUnexaminedTestChange(testFilePath: String, projectPath: String) {
+        let relativePath = PathRelativizer.relativePath(for: testFilePath, relativeTo: projectPath)
+        let message =
+            "warning: \(relativePath) is in scope but maps to no source file and no --baseline-report "
+            + "was given — its test change was not examined\n"
+        fputs(message, stderr)
     }
 
     /// A diff names a file relative to the project, which is the form the scope keeps. Recognising

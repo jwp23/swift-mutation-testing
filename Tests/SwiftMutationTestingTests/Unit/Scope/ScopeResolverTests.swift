@@ -182,6 +182,67 @@ struct ScopeResolverTests {
         #expect(scope?.contains(filePath: "/p/Sources/Foo.swift", line: 900) == false)
     }
 
+    @Test(
+        "Given a changed test file that maps to no source and no baseline report, when resolved, then it warns on stderr"
+    )
+    func changedTestFileWithNoMappedSourceWarns() async throws {
+        let resolver = ScopeResolver(launcher: changedUnmappableTestFileLauncher())
+
+        let stderr = try await captureStandardError {
+            _ = try await resolver.resolve(configuration: makeRunnerConfiguration(since: "main"))
+        }
+
+        #expect(
+            stderr
+                == "warning: Tests/TestSupport/Fixtures.swift is in scope but maps to no source file and "
+                    + "no --baseline-report was given — its test change was not examined\n"
+        )
+    }
+
+    @Test(
+        "Given a changed test file that maps to no source but a baseline report was given, when resolved, then it does not warn"
+    )
+    func changedTestFileWithNoMappedSourceAndBaselineReportDoesNotWarn() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+        let reportPath = try writeBaselineReport(in: dir)
+        let resolver = ScopeResolver(launcher: changedUnmappableTestFileLauncher())
+
+        let stderr = try await captureStandardError {
+            _ = try await resolver.resolve(
+                configuration: makeRunnerConfiguration(since: "main", baselineReport: reportPath)
+            )
+        }
+
+        #expect(stderr.isEmpty)
+    }
+
+    @Test("Given a changed test file that maps to its source, when resolved, then it does not warn")
+    func changedTestFileWithMappedSourceDoesNotWarn() async throws {
+        let resolver = ScopeResolver(launcher: changedTestFileLauncher())
+
+        let stderr = try await captureStandardError {
+            _ = try await resolver.resolve(configuration: makeRunnerConfiguration(since: "main"))
+        }
+
+        #expect(stderr.isEmpty)
+    }
+
+    /// A diff that changes one test-support file whose name pairs with no source under either the
+    /// naming convention or a configured override.
+    private func changedUnmappableTestFileLauncher() -> MockProcessLauncher {
+        MockProcessLauncher(
+            exitCode: 0,
+            output: """
+                --- a/Tests/TestSupport/Fixtures.swift
+                +++ b/Tests/TestSupport/Fixtures.swift
+                @@ -4 +4 @@
+                +    let a = 1
+                """,
+            producesTestBundle: false
+        )
+    }
+
     @Test("Given a baseline report, when a test changed, then the mutants it killed elsewhere are in scope")
     func changedTestFileScopesTheMutantsItKilled() async throws {
         let dir = try FileHelpers.makeTemporaryDirectory()
