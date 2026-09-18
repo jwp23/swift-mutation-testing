@@ -73,14 +73,21 @@ swift run swift-mutation-testing Fixtures/CalcApp \
 
 ## Repository Hooks
 
-Hooks are already installed and committed to this repository — `core.hooksPath`
-points at `.beads/hooks/`, whose scripts chain beads' own integration together
-with the pre-commit framework. There is nothing to install after cloning.
+The hook scripts themselves are already committed to this repository under
+`.beads/hooks/`, chaining beads' own integration together with the pre-commit
+framework — but `core.hooksPath` lives in `.git/config`, which git never
+clones. After cloning, point git at the committed hooks once:
+
+```bash
+bd hooks install --beads
+```
+
+This sets `core.hooksPath` to `.beads/hooks/` and is safe to re-run.
 
 **Do not run `pre-commit install` or `pre-commit install --hook-type
 commit-msg`.** Both refuse outright (`Cowardly refusing to install hooks with
-'core.hooksPath' set`, exit 1, no files written) because `core.hooksPath` is
-permanently set here — they are not part of this repo's setup flow.
+'core.hooksPath' set`, exit 1, no files written) once `core.hooksPath` is set
+as above — they are not part of this repo's setup flow.
 
 The hook set includes conventional commit validation, common file checks,
 codespell, SwiftLint, swift-format, Swift code duplication detection,
