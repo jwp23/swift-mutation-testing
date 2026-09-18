@@ -55,9 +55,9 @@ Handles cleanup of orphaned sandbox directories and signal-based cleanup of the 
 
 **Orphaned cleanup (`removeOrphaned`):** Called once at startup via `main()`. Scans `$TMPDIR` (or a provided directory) for directories prefixed with `xmr-` and removes them. This cleans up sandboxes from previous interrupted runs that were never cleaned up normally.
 
-**Signal cleanup (`installSignalHandlers`):** Installs `SIGINT` and `SIGTERM` handlers at startup. When a signal is received, the handler removes every registered sandbox directory and calls `_exit(1)`. Registered paths are held in a `nonisolated(unsafe)` module-scope array of `UnsafeMutablePointer<CChar>` — necessary because signal handlers are C function pointers that cannot capture Swift context.
+**Signal cleanup (`installSignalHandlers`):** Installs `SIGINT` and `SIGTERM` handlers at startup, together with a self-pipe and a watcher thread that blocks reading it. The handler itself only writes one byte to the pipe — the sole async-signal-safe step — and the watcher thread, running in ordinary context, removes every registered sandbox directory and calls `_exit(1)`. Registered roots are held in a `nonisolated(unsafe)` module-scope array guarded by an `NSLock` that the signal handler never takes, so a signal arriving mid-`register` can neither read a torn array nor deadlock on the lock. If the pipe cannot be created the handlers are left at their default disposition and the next run's `removeOrphaned` sweep reclaims the sandboxes.
 
-**Lifecycle:** a run holds one sandbox per worker, so `MutantExecutor` calls `register(sandbox)` once per sandbox after creating it and `deregister()` after cleanup (both on the success and error paths), keeping the array in sync with the sandboxes that are actually live so the signal handler always removes exactly those.
+**Lifecycle:** a run holds one sandbox per worker, so `MutantExecutor` calls `register(sandbox)` once per sandbox after creating it and `deregister()` after cleanup (both on the success and error paths), keeping the array in sync with the sandboxes that are actually live so the signal cleanup always removes exactly those.
 
 ## BuildStage
 
@@ -301,7 +301,7 @@ score = killed / (killed + survived + timedOut + noCoverage) × 100
 | `TestExecutionStage` | `withThrowingTaskGroup` — N tasks, dynamically refilled |
 | `ProcessRunner` | `withTaskCancellationHandler` + `withCheckedThrowingContinuation` — kills process on cancel; `launchStreaming` resumes once the process has exited and its output pipe has reached end of file, or a five-second grace after the exit if a descendant that escaped the process group is still holding the pipe open |
 | `SPMProcessLauncher` | `ProcessLaunching` conformance backed by `ProcessRunner`; `frozenDescendantPIDs(of:)` `SIGSTOP`s the launched process's tree and snapshots its descendants (via `sysctl` `KERN_PROC_ALL` parent-pid walk) before `SIGTERM`, so nothing can fork past the walk, and `killDescendants(_:)` kills that snapshot after the grace period to catch descendants that escaped the process group |
-| `SandboxCleaner` | `nonisolated(unsafe)` array of C pointers (one per registered sandbox) for signal handler access; `register`/`deregister` called sequentially from `MutantExecutor.execute` |
+| `SandboxCleaner` | `nonisolated(unsafe)` array of sandbox roots guarded by an `NSLock`; the signal handler only writes to a self-pipe, and the watcher thread it wakes does the locked cleanup |
 | All data types | `Sendable` value types — safe to cross actor boundaries |
 
 ---
