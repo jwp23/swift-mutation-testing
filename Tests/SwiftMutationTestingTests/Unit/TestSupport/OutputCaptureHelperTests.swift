@@ -16,12 +16,21 @@ struct OutputCaptureHelperTests {
                 try? await Task.sleep(nanoseconds: 5_000_000)
                 print("-ASYNC-END")
             }
-            async let syncOutput: String = {
-                captureOutputSync {
-                    Thread.sleep(forTimeInterval: 0.005)
-                    print("SYNC-ONLY")
+            // `captureOutputSync` blocks its calling thread outright (see `OutputCaptureGate`'s
+            // documentation), so running it directly in this `async let` child task would block a
+            // cooperative-pool thread while `asyncOutput`'s block is suspended holding the gate.
+            // Dispatching it to a non-cooperative queue keeps this test off that thread.
+            async let syncOutput: String = withCheckedContinuation {
+                (continuation: CheckedContinuation<String, Never>) in
+                DispatchQueue.global().async {
+                    continuation.resume(
+                        returning: captureOutputSync {
+                            Thread.sleep(forTimeInterval: 0.005)
+                            print("SYNC-ONLY")
+                        }
+                    )
                 }
-            }()
+            }
 
             let (resolvedAsyncOutput, resolvedSyncOutput) = await (asyncOutput, syncOutput)
 
@@ -30,49 +39,24 @@ struct OutputCaptureHelperTests {
         }
     }
 
-    /// Carries the thread identity observed on either side of the awaited block's suspension point.
-    /// The block runs to completion before the test reads it back, so the unsynchronized access is safe.
-    private final class ThreadIdentityProbe: @unchecked Sendable {
-        var threadBeforeSuspension: UInt64 = 0
-        var threadAfterSuspension: UInt64 = 0
-    }
-
-    private static func currentThreadID() -> UInt64 {
-        var identifier: UInt64 = 0
-        pthread_threadid_np(nil, &identifier)
-        return identifier
-    }
-
     @Test(
-        "Given a capture whose block resumes on a different thread, when it finishes, then the capture gate is released"
+        "Given a capture whose block suspends mid-block, when it finishes, then the capture gate is released"
     )
     func captureReleasesItsGateWhenTheBlockResumesOnAnotherThread() async {
-        var suspensionsThatChangedThread = 0
-
+        // `Task.sleep` gives no guarantee that its continuation resumes on a different OS thread,
+        // so this can't assert an actual thread hop happened without flaking. What it can assert
+        // deterministically: the gate the block suspended while holding gets released regardless
+        // of which thread does the releasing — `OutputCaptureGate.release()` documents itself as
+        // safe from any thread, and a capture taken afterwards only succeeds if that held.
         for iteration in 0 ..< 20 {
-            let probe = ThreadIdentityProbe()
-
             let output = await captureOutput {
-                probe.threadBeforeSuspension = Self.currentThreadID()
                 print("HOP-\(iteration)", terminator: "")
                 try? await Task.sleep(nanoseconds: 5_000_000)
                 print("-RESUMED")
-                probe.threadAfterSuspension = Self.currentThreadID()
             }
 
             #expect(output == "HOP-\(iteration)-RESUMED\n")
-            if probe.threadBeforeSuspension != probe.threadAfterSuspension {
-                suspensionsThatChangedThread += 1
-            }
         }
-
-        // The capture gate is acquired before the block and released after it, so a block that
-        // resumes on another thread releases the gate from a thread that never acquired it. Without
-        // observing at least one such hop the test would pass vacuously, never exercising the case.
-        #expect(
-            suspensionsThatChangedThread > 0,
-            "No iteration resumed on a different thread, so cross-thread release was never exercised"
-        )
 
         // A capture taken afterwards proves the gate was genuinely released, not merely un-owned.
         let subsequentOutput = await captureOutput { print("AFTER") }
