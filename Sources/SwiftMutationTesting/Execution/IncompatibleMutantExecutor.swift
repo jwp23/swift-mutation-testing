@@ -71,7 +71,7 @@ struct IncompatibleMutantExecutor: Sendable {
                 environment: nil,
                 additionalEnvironment: [:],
                 workingDirectoryURL: sandbox.rootURL,
-                timeout: configuration.build.timeout
+                timeout: configuration.build.buildTimeout
             )
         )
 
@@ -136,7 +136,7 @@ struct IncompatibleMutantExecutor: Sendable {
                 environment: nil,
                 additionalEnvironment: [:],
                 workingDirectoryURL: sandbox.rootURL,
-                timeout: configuration.build.timeout
+                timeout: configuration.build.buildTimeout
             )
         )
 

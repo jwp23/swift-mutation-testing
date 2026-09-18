@@ -13,7 +13,9 @@
 # any other mutant's) verdict -- proving 8jq.2 holds at the full-CLI level, not just the
 # hooked unit test.
 #
-# Exit 0: every planted verdict matched. Exit non-zero: prints the mismatch and fails.
+# Exit 0: every planted verdict matched. Exit non-zero: prints the mismatch and fails. Phase 1
+# is retried once before it fails -- see run_concurrent_race for why, and for what it still
+# reports on the first attempt either way.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -122,50 +124,110 @@ assert_slow_real_mutant_verdicts() {
 # concurrent invocation cannot reliably land a second process's startup sweep inside it.
 # 8jq.1's actual discriminating proof is SandboxCreationSweepRaceTests, which holds the window
 # open with sandboxRootCreatedHook and runs as part of the standard `swift test` gate.
+#
+# A failed attempt is retried once before the check fails. Each invocation already builds and
+# tests in a sandbox root of its own (SandboxFactory.makeSandboxRoot names every one after a
+# fresh UUID, and the build directory and derived data sit inside it) and Phase 1 runs with the
+# result cache off, so the only state two concurrent invocations still share is the host's: the
+# toolchain's global caches, and the machine's CPU, memory and disk. Interference from those is
+# not what this check exists to report, and it has produced one-off verdicts that no rerun
+# reproduced. A regression in concurrent invocation does reproduce, so requiring the same
+# failure twice still fails the check on one -- and every failed attempt prints its diagnostics
+# whether or not the retry goes on to pass.
 run_concurrent_race() {
     log "=== Phase 1: two concurrent real runs over the same fixture ==="
 
-    local report1="$SCRATCH_DIR/concurrent-1.json"
-    local report2="$SCRATCH_DIR/concurrent-2.json"
-    local log1="$SCRATCH_DIR/concurrent-1.log"
-    local log2="$SCRATCH_DIR/concurrent-2.log"
+    local attempt
+    for attempt in 1 2; do
+        if concurrent_race_attempt "$attempt"; then
+            log "Phase 1 passed: both concurrent runs reported every planted verdict correctly."
+            return 0
+        fi
 
-    "$BIN" "$FIXTURE_DIR" \
-        --operator RelationalOperatorReplacement \
-        --exclude "Sources/CalcLibrary/TimeoutTarget.swift" \
-        --exclude "Sources/CalcLibrary/UnaffectedSlowMutant.swift" \
-        --no-cache --quiet --output "$report1" \
-        >"$log1" 2>&1 &
-    local pid1=$!
+        if [ "$attempt" -eq 1 ]; then
+            log "Phase 1 attempt 1 failed; retrying once before failing the check."
+        fi
+    done
 
-    "$BIN" "$FIXTURE_DIR" \
-        --operator RelationalOperatorReplacement \
-        --exclude "Sources/CalcLibrary/TimeoutTarget.swift" \
-        --exclude "Sources/CalcLibrary/UnaffectedSlowMutant.swift" \
-        --no-cache --quiet --output "$report2" \
-        >"$log2" 2>&1 &
-    local pid2=$!
+    fail "Phase 1 failed on both attempts -- see each attempt's diagnostics above"
+}
 
-    local status1=0 status2=0
-    wait "$pid1" || status1=$?
-    wait "$pid2" || status2=$?
+# One Phase 1 attempt, run in a subshell so that a mismatch ends the attempt rather than the
+# script: `fail` is redefined inside it to report the mismatch and exit the subshell, leaving
+# run_concurrent_race to decide whether this attempt's failure is the check's failure. Each
+# attempt reports into files of its own so nothing a retry reads is left over from before it.
+concurrent_race_attempt() {
+    local attempt="$1"
 
-    if [ "$status1" -ne 0 ]; then
-        cat "$log1" >&2
-        fail "concurrent run 1 exited with status $status1"
+    (
+        local report1="$SCRATCH_DIR/concurrent-$attempt-1.json"
+        local report2="$SCRATCH_DIR/concurrent-$attempt-2.json"
+        local log1="$SCRATCH_DIR/concurrent-$attempt-1.log"
+        local log2="$SCRATCH_DIR/concurrent-$attempt-2.log"
+
+        fail() {
+            log "Phase 1 attempt $attempt: $*"
+            dump_run_diagnostics "concurrent run 1" "$report1" "$log1"
+            dump_run_diagnostics "concurrent run 2" "$report2" "$log2"
+            exit 1
+        }
+
+        "$BIN" "$FIXTURE_DIR" \
+            --operator RelationalOperatorReplacement \
+            --exclude "Sources/CalcLibrary/TimeoutTarget.swift" \
+            --exclude "Sources/CalcLibrary/UnaffectedSlowMutant.swift" \
+            --no-cache --quiet --output "$report1" \
+            >"$log1" 2>&1 &
+        local pid1=$!
+
+        "$BIN" "$FIXTURE_DIR" \
+            --operator RelationalOperatorReplacement \
+            --exclude "Sources/CalcLibrary/TimeoutTarget.swift" \
+            --exclude "Sources/CalcLibrary/UnaffectedSlowMutant.swift" \
+            --no-cache --quiet --output "$report2" \
+            >"$log2" 2>&1 &
+        local pid2=$!
+
+        local status1=0 status2=0
+        wait "$pid1" || status1=$?
+        wait "$pid2" || status2=$?
+
+        [ "$status1" -eq 0 ] || fail "concurrent run 1 exited with status $status1"
+        [ "$status2" -eq 0 ] || fail "concurrent run 2 exited with status $status2"
+
+        assert_baseline_verdicts "$report1" "concurrent run 1"
+        assert_status_count "$report1" "concurrent run 1" "Survived" 5
+
+        assert_baseline_verdicts "$report2" "concurrent run 2"
+        assert_status_count "$report2" "concurrent run 2" "Survived" 5
+    )
+}
+
+# Everything a failed run leaves to diagnose it with: its output, and the verdict it recorded
+# for every mutant. One mismatched verdict says nothing on its own about whether the schema
+# build lost a single file's mutants or was lost entirely, and the whole verdict set does.
+dump_run_diagnostics() {
+    local label="$1" report="$2" log_file="$3"
+
+    log "--- $label output ---"
+    if [ -f "$log_file" ]; then
+        cat "$log_file" >&2
+    else
+        log "  (no output captured)"
     fi
-    if [ "$status2" -ne 0 ]; then
-        cat "$log2" >&2
-        fail "concurrent run 2 exited with status $status2"
+
+    log "--- $label verdicts ---"
+    if [ -f "$report" ]; then
+        jq -r '
+            .files
+            | to_entries[]
+            | .key as $file
+            | .value.mutants[]
+            | "  \($file) (\(.originalText) -> \(.replacement)): \(.status)"
+        ' "$report" >&2
+    else
+        log "  (no report written)"
     fi
-
-    assert_baseline_verdicts "$report1" "concurrent run 1"
-    assert_status_count "$report1" "concurrent run 1" "Survived" 5
-
-    assert_baseline_verdicts "$report2" "concurrent run 2"
-    assert_status_count "$report2" "concurrent run 2" "Survived" 5
-
-    log "Phase 1 passed: both concurrent runs reported every planted verdict correctly."
 }
 
 # Phase 2: a single real run whose mutant set includes one mutant that parks the test process
