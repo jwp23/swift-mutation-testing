@@ -570,6 +570,18 @@ Wraps the raw plist `Data` from the `.xctestrun` file.
 
 ---
 
+## Infrastructure/PathRelativizer.swift
+
+```swift
+enum PathRelativizer {
+    static func relativePath(for path: String, relativeTo root: String) -> String
+}
+```
+
+Resolves `path` relative to `root`, symlink-resolving both first so callers get a consistent, comparable path shape — used as cache/metadata dictionary keys by `CacheStore` and `TestFilesHasher`. Returns `path` unchanged if it doesn't fall under `root` (e.g. a symlinked test file pointing outside the project root).
+
+---
+
 ## Infrastructure/TestFilesHasher.swift
 
 ```swift

@@ -55,9 +55,9 @@ Handles cleanup of orphaned sandbox directories and signal-based cleanup of the 
 
 **Orphaned cleanup (`removeOrphaned`):** Called once at startup via `main()`. Scans `$TMPDIR` (or a provided directory) for directories prefixed with `xmr-` and removes them. This cleans up sandboxes from previous interrupted runs that were never cleaned up normally.
 
-**Signal cleanup (`installSignalHandlers`):** Installs `SIGINT` and `SIGTERM` handlers at startup. When a signal is received, the handler removes the active sandbox directory (if registered) and calls `_exit(1)`. Uses a `nonisolated(unsafe)` C pointer for the active path — necessary because signal handlers are C function pointers that cannot capture Swift context.
+**Signal cleanup (`installSignalHandlers`):** Installs `SIGINT` and `SIGTERM` handlers at startup. When a signal is received, the handler removes every registered sandbox directory and calls `_exit(1)`. Registered paths are held in a `nonisolated(unsafe)` module-scope array of `UnsafeMutablePointer<CChar>` — necessary because signal handlers are C function pointers that cannot capture Swift context.
 
-**Lifecycle:** `MutantExecutor` calls `register(sandbox)` after creating the sandbox and `deregister()` after cleanup (both on the success and error paths). This ensures the signal handler always has the correct path.
+**Lifecycle:** a run holds one sandbox per worker, so `MutantExecutor` calls `register(sandbox)` once per sandbox after creating it and `deregister()` after cleanup (both on the success and error paths), keeping the array in sync with the sandboxes that are actually live so the signal handler always removes exactly those.
 
 ## BuildStage
 
@@ -301,7 +301,7 @@ score = killed / (killed + survived + timedOut + noCoverage) × 100
 | `TestExecutionStage` | `withThrowingTaskGroup` — N tasks, dynamically refilled |
 | `ProcessRunner` | `withTaskCancellationHandler` + `withCheckedThrowingContinuation` — kills process on cancel; `launchStreaming` resumes once the process has exited and its output pipe has reached end of file, or a five-second grace after the exit if a descendant that escaped the process group is still holding the pipe open |
 | `SPMProcessLauncher` | `ProcessLaunching` conformance backed by `ProcessRunner`; `frozenDescendantPIDs(of:)` `SIGSTOP`s the launched process's tree and snapshots its descendants (via `sysctl` `KERN_PROC_ALL` parent-pid walk) before `SIGTERM`, so nothing can fork past the walk, and `killDescendants(_:)` kills that snapshot after the grace period to catch descendants that escaped the process group |
-| `SandboxCleaner` | `nonisolated(unsafe)` C pointer for signal handler access; `register`/`deregister` called sequentially from `MutantExecutor.execute` |
+| `SandboxCleaner` | `nonisolated(unsafe)` array of C pointers (one per registered sandbox) for signal handler access; `register`/`deregister` called sequentially from `MutantExecutor.execute` |
 | All data types | `Sendable` value types — safe to cross actor boundaries |
 
 ---

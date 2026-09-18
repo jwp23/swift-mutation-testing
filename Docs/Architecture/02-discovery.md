@@ -6,14 +6,15 @@
 
 ## Design
 
-The discovery pipeline is a **linear chain of pure stages**. Each stage receives an immutable input, produces an immutable output, and has no side effects. `DiscoveryPipeline` is the entry point and orchestrates the six stages sequentially.
+The discovery pipeline is a **linear chain of pure stages**. Each stage receives an immutable input, produces an immutable output, and has no side effects. `DiscoveryPipeline` is the entry point and orchestrates the stages below sequentially.
 
 ```mermaid
 flowchart TD
     IN[DiscoveryInput] --> FD[FileDiscoveryStage]
     FD --> PA[ParsingStage]
     PA --> MD[MutantDiscoveryStage]
-    MD --> MI[MutantIndexingStage]
+    MD --> SFS[ScopeFilterStage]
+    SFS --> MI[MutantIndexingStage]
     MI --> SC[SchematizationStage]
     MI --> IR[IncompatibleRewritingStage]
     SC --> OUT[RunnerInput]
@@ -54,6 +55,17 @@ Applies mutation operators to each parsed source and collects mutation points. R
 | Output | `[MutationPoint]` — file path, position, original text, mutated text, operator |
 
 Each operator walks the AST with its own visitor and emits a `MutationPoint` for every applicable node. Points are collected from all operators and all files, then returned as a flat list.
+
+### ScopeFilterStage
+
+Drops mutants outside the run's scope, so a scoped run schematizes, builds, and tests only what it was asked about.
+
+| | |
+|---|---|
+| Input | `[MutationPoint]`, `MutantScope?` |
+| Output | `[MutationPoint]` — unchanged when the scope is `nil` |
+
+The scope itself (`MutantScope?`, carried on `DiscoveryInput.scope`) is resolved by `ScopeResolver` *before* the discovery pipeline runs at all, from `--scope-lines`, `--since`, and `--baseline-report`. See [CodeBase § Scope Resolution](../CodeBase/03-discovery-pipeline.md#scope-resolution) for the full breakdown of `ScopeResolver`, `MutantScope`, `GitDiffReader`/`GitDiffParser`, `ScopeLineSpecParser`, and `BaselineReport`.
 
 ### MutantIndexingStage
 
@@ -117,6 +129,7 @@ DiscoveryInput
 ├── sourcesPath       — root for Swift file discovery
 ├── excludePatterns   — glob patterns to skip
 ├── operators         — list of active operator identifiers
+├── scope             — MutantScope?, resolved before discovery; nil for an unscoped run
 └── timeout, concurrency, noCache
 
 SourceFile
