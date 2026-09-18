@@ -80,9 +80,14 @@ clones. After cloning, point git at the committed hooks once:
 
 ```bash
 bd hooks install --beads
+pre-commit init-templatedir --no-allow-missing-config -t pre-commit \
+  "$(git rev-parse --path-format=absolute --git-common-dir)"
 ```
 
-This sets `core.hooksPath` to `.beads/hooks/` and is safe to re-run.
+The first command sets `core.hooksPath` to `.beads/hooks/`; the second generates the
+pre-commit framework's own hook script in the shared git directory, which the beads
+shim chains into. Skipping it does not break commits — the shim only warns and lint/
+format/spelling checks silently do not run. Both commands are safe to re-run.
 
 **Do not run `pre-commit install` or `pre-commit install --hook-type
 commit-msg`.** Both refuse outright (`Cowardly refusing to install hooks with
