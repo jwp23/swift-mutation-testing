@@ -596,9 +596,9 @@ Provides per-file test hashing and test file path enumeration for granular cache
 | Method | Description |
 |---|---|
 | `hashPerFile(projectPath:)` | Returns a dictionary mapping relative test file paths to their SHA256 content hashes. Symlinks pointing outside the project root use absolute paths as keys to avoid collisions |
-| `testFilePaths(projectPath:)` | Returns all test file paths in the project |
+| `testFilePaths(projectPath:)` | Returns all test file paths in the project, as absolute filesystem paths (unlike `hashPerFile`'s relativized keys) |
 
-**Test file collection:** files whose containing directory name ends with `Tests` or `Specs`, or whose filename matches `*Tests.swift` or `*Specs.swift`.
+**Test file collection:** walks `projectPath` recursively (skipping hidden files) and includes every `.swift` file where any path component (not just the immediate parent directory) ends with `Tests`, or whose filename ends with `Tests.swift`. This is a separate heuristic from `SourceFileExclusion.isInTestDirectory`; the two are not guaranteed to agree on every file.
 
 ---
 
