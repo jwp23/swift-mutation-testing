@@ -104,7 +104,8 @@ struct ConfigurationResolver: Sendable {
 
     private func resolvedBuildTimeout(cli: ParsedArguments, fileValues: [String: String]) -> Double {
         if let buildTimeout = cli.build.buildTimeout { return buildTimeout }
-        if let buildTimeout = fileValues["build-timeout"].flatMap(Double.init), buildTimeout.isFinite, buildTimeout > 0 {
+        if let buildTimeout = fileValues["build-timeout"].flatMap(Double.init), buildTimeout.isFinite, buildTimeout > 0
+        {
             return buildTimeout
         }
 

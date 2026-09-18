@@ -2,6 +2,14 @@ default_install_hook_types:
   - pre-commit
   - commit-msg
 
+# Hooks below that do not name their own stages inspect working-tree files, so they have
+# nothing to say about a commit message. Without this they also run at commit-msg time
+# against COMMIT_EDITMSG alone and report a misleading "(no files to check)Skipped".
+default_stages:
+  - pre-commit
+  - pre-push
+  - manual
+
 repos:
   # Conventional Commits
   - repo: https://github.com/compilerla/conventional-pre-commit
