@@ -34,10 +34,17 @@ fi
 
 # --- BEGIN CHAINED: pre-commit framework (.pre-commit-config.yaml) ---
 # Kept outside the BEADS markers so `bd hooks install` upgrades don't remove it.
-# Runs whatever `pre-commit install` last generated at .git/hooks/pre-commit.
-_repo_root="$(git rev-parse --show-toplevel)"
-if [ -x "$_repo_root/.git/hooks/pre-commit" ]; then
-  "$_repo_root/.git/hooks/pre-commit" "$@"
+# Runs the hook script pre-commit generated in the shared git directory.
+# Resolve that directory with --git-common-dir rather than "<toplevel>/.git": in a linked
+# worktree the latter is a gitdir *file*, so the chain would silently run nothing.
+_git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+if [ -x "$_git_common_dir/hooks/pre-commit" ]; then
+  "$_git_common_dir/hooks/pre-commit" "$@"
   exit $?
 fi
+# `pre-commit install` cannot regenerate that script here: it refuses outright whenever
+# core.hooksPath is set, which is this repo's permanent state. init-templatedir writes the
+# same script to an explicit directory and is the only command that works in this setup.
+echo >&2 "warning: no pre-commit framework hook at $_git_common_dir/hooks/pre-commit — lint, format and spelling checks did not run"
+echo >&2 "hint: 'pre-commit install' refuses while core.hooksPath is set; regenerate with: pre-commit init-templatedir --no-allow-missing-config -t pre-commit '$_git_common_dir'"
 # --- END CHAINED: pre-commit framework ---
