@@ -351,8 +351,11 @@ Manages a fixed-size pool of simulator slots for parallel test execution.
 
 | Destination | `setUp` behaviour | `tearDown` behaviour |
 |---|---|---|
-| `platform=macOS` | Creates one no-op slot (no UDID) | No-op |
+| `platform=macOS` | Creates `size` no-op slots (no UDID) | No-op |
 | iOS / tvOS / watchOS | Clones the base simulator `size` times; boots each clone | Shuts down and deletes each clone |
+
+When a clone fails, `setUp` still waits for the remaining clone workers and records every
+simulator that was created before rethrowing, so `tearDown` deletes them instead of leaking them.
 
 `acquire()` returns an available slot immediately or suspends the caller until one is released. The suspension is wrapped with `withTaskCancellationHandler` — if the owning task is cancelled, the slot is released to prevent permanent deadlock.
 

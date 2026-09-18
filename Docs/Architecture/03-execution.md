@@ -91,8 +91,12 @@ flowchart TD
 
 | Destination | Behaviour |
 |---|---|
-| `platform=macOS` | Single slot, no simulator needed; `setUp` and `tearDown` are no-ops |
+| `platform=macOS` | One slot per concurrency slot, no simulator needed; `setUp` creates the slots without simulator commands and `tearDown` is a no-op |
 | iOS / tvOS / watchOS | Clones the base simulator N times (one per concurrency slot); boots each clone on `setUp`; shuts down and deletes on `tearDown` |
+
+A failed clone does not abandon its siblings: `setUp` waits for every clone worker to finish and
+records each simulator that was actually created before it rethrows, so `tearDown` can delete
+them all.
 
 `acquire()` returns an available `SimulatorSlot` or suspends the caller until one is released. A `withTaskCancellationHandler` wraps the suspension — if the owning task is cancelled, the slot is released immediately to avoid a permanent deadlock.
 

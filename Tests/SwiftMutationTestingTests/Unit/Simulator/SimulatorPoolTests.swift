@@ -5,8 +5,8 @@ import Testing
 
 @Suite("SimulatorPool")
 struct SimulatorPoolTests {
-    @Test("Given macOS destination, when setUp called, then creates single slot with original destination")
-    func setUpMacOSCreatesSingleSlot() async throws {
+    @Test("Given macOS destination, when setUp called, then slots keep the original destination")
+    func setUpMacOSKeepsOriginalDestination() async throws {
         let pool = SimulatorPool(
             baseUDID: nil,
             size: 4,
@@ -118,6 +118,86 @@ struct SimulatorPoolTests {
         }
 
         await pool.release(firstSlot)
+    }
+
+    @Test(
+        "Given no baseUDID and concurrency greater than one, when setUp called, then creates that many acquirable slots"
+    )
+    func setUpWithoutSimulatorCreatesConcurrencyManySlots() async throws {
+        let pool = SimulatorPool(
+            baseUDID: nil,
+            size: 3,
+            destination: "platform=macOS",
+            launcher: MockProcessLauncher(exitCode: 0)
+        )
+        try await pool.setUp()
+
+        // Cancellation bounds the acquires: a pool that hands out fewer slots than its size
+        // suspends on one of them forever, and that has to surface as a failure, not a hang.
+        let acquisitions = Task { () -> [SimulatorSlot] in
+            var slots: [SimulatorSlot] = []
+            for _ in 0 ..< 3 { slots.append(try await pool.acquire()) }
+            return slots
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        acquisitions.cancel()
+
+        #expect(try await acquisitions.value.count == 3)
+
+        let beyondPool = Task { try await pool.acquire() }
+        try await Task.sleep(for: .milliseconds(50))
+        beyondPool.cancel()
+
+        await #expect(throws: (any Error).self) {
+            try await beyondPool.value
+        }
+    }
+
+    @Test(
+        "Given one clone succeeds and a sibling clone fails, when setUp called, then succeeded clone stays tracked for teardown"
+    )
+    func partialCloneFailureTracksSucceededCloneForTeardown() async throws {
+        let launcher = PartialCloneFailureLauncher()
+
+        let pool = SimulatorPool(
+            baseUDID: "BASE-UDID",
+            size: 2,
+            destination: "platform=iOS Simulator,name=iPhone 15",
+            launcher: launcher
+        )
+
+        await #expect(throws: (any Error).self) {
+            try await pool.setUp()
+        }
+
+        await pool.tearDown()
+
+        let deleteCalls = await launcher.recordedArguments.filter { $0.contains("delete") }
+        #expect(deleteCalls.contains { $0.contains("CLONE-0") })
+    }
+
+    @Test(
+        "Given a clone that lands after a sibling clone failed, when setUp called, then it stays tracked for teardown"
+    )
+    func partialCloneFailureTracksClonesFinishingAfterTheFailure() async throws {
+        let launcher = PartialCloneFailureLauncher()
+
+        let pool = SimulatorPool(
+            baseUDID: "BASE-UDID",
+            size: 3,
+            destination: "platform=iOS Simulator,name=iPhone 15",
+            launcher: launcher
+        )
+
+        await #expect(throws: (any Error).self) {
+            try await pool.setUp()
+        }
+
+        await pool.tearDown()
+
+        let deleteCalls = await launcher.recordedArguments.filter { $0.contains("delete") }
+        #expect(deleteCalls.contains { $0.contains("CLONE-0") })
+        #expect(deleteCalls.contains { $0.contains("CLONE-2") })
     }
 
     @Test("Given setUp with simulator, when tearDown called, then pool size is preserved")
