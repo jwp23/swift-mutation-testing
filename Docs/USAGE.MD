@@ -333,6 +333,15 @@ scope therefore also puts in scope:
 A deleted test file counts as changed: it has no lines left, but the source it covered goes back in
 scope whole.
 
+**The guard is not unconditional.** A test file whose name pairs with no source under the
+convention or an override — and for which no `--baseline-report` was given either — contributes
+nothing to the scope, so its change goes unexamined. The run warns on stderr when this happens,
+naming the test file, rather than passing silently:
+
+```
+warning: Tests/IntegrationTests.swift is in scope but maps to no source file and no --baseline-report was given — its test change was not examined
+```
+
 `--baseline-report` only widens a scope `--scope-lines` or `--since` already narrowed, so it
 requires one of them — given alone, it has nothing to widen and the run would test every mutant
 regardless.
