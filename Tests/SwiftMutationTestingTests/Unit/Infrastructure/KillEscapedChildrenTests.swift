@@ -179,17 +179,32 @@ struct KillEscapedChildrenTests {
             kill(root.processIdentifier, SIGKILL)
         }
 
-        try await Task.sleep(for: .milliseconds(200))
+        // Poll for the first fork rather than sleeping a fixed duration: on a loaded CI runner,
+        // a fixed wait can elapse before the shell has even been scheduled to run its first
+        // loop iteration, taking the snapshot of a still-empty tree. The spawn loop still has
+        // dozens of forks ahead of it at this point (cadence ~50ms, 40 total), so the freeze
+        // below is still exercised against an actively-forking tree, not a finished one.
+        var preSnapshotCount = descendantPIDs(of: root.processIdentifier).count
+        for _ in 0 ..< 500 where preSnapshotCount == 0 {
+            try await Task.sleep(for: .milliseconds(10))
+            preSnapshotCount = descendantPIDs(of: root.processIdentifier).count
+        }
+        #expect(preSnapshotCount > 0)
 
         let snapshot = frozenDescendantPIDs(of: root.processIdentifier)
         #expect(!snapshot.isEmpty)
 
-        // Several more forks would land in this interval at the root's spawn cadence.
-        try await Task.sleep(for: .milliseconds(500))
-
+        // Sample repeatedly over a window rather than sleeping once and reading once: a single
+        // end-of-window read is itself a fixed-timing assumption about when a leaked fork would
+        // be visible. Several more forks would land across this window at the root's spawn
+        // cadence if the freeze above failed to hold.
         let snapshotPIDs = Set(snapshot.map(\.pid))
-        let appearedAfterSnapshot = descendantPIDs(of: root.processIdentifier)
-            .filter { !snapshotPIDs.contains($0.pid) }
+        var appearedAfterSnapshot: [DescendantSnapshot] = []
+        for _ in 0 ..< 10 {
+            try await Task.sleep(for: .milliseconds(50))
+            appearedAfterSnapshot += descendantPIDs(of: root.processIdentifier)
+                .filter { !snapshotPIDs.contains($0.pid) }
+        }
         #expect(appearedAfterSnapshot.isEmpty)
     }
 
