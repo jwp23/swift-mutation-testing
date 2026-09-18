@@ -6,7 +6,9 @@ import Testing
 struct SourceFileExclusionTests {
     private let exclusion = SourceFileExclusion()
 
-    @Test("Given a path under a literal Tests directory with a project-named test subdirectory, when excludes, then returns true")
+    @Test(
+        "Given a path under a literal Tests directory with a project-named test subdirectory, when excludes, then returns true"
+    )
     func excludesNestedProjectTestDirectory() {
         #expect(exclusion.excludes(path: "Tests/AppTests/Login.swift"))
     }
@@ -26,7 +28,9 @@ struct SourceFileExclusionTests {
         #expect(!exclusion.excludes(path: "Sources/ABTests/Foo.swift"))
     }
 
-    @Test("Given a source feature directory ending in Tests nested two levels under Sources, when excludes, then returns false")
+    @Test(
+        "Given a source feature directory ending in Tests nested two levels under Sources, when excludes, then returns false"
+    )
     func doesNotExcludeNestedSourceFeatureDirectory() {
         #expect(!exclusion.excludes(path: "Sources/Analytics/ExperimentTests/Foo.swift"))
     }

@@ -49,7 +49,7 @@ struct FallbackExecutor: Sendable {
                     sandbox: sandbox,
                     scheme: scheme,
                     destination: destination,
-                    timeout: configuration.build.timeout
+                    timeout: configuration.build.buildTimeout
                 )
                 await deps.reporter.report(.fallbackBuildFinished(filePath: file.originalPath, success: true))
             } catch {
@@ -62,7 +62,7 @@ struct FallbackExecutor: Sendable {
             do {
                 artifact = try await BuildStage(launcher: deps.launcher).buildSPM(
                     sandbox: sandbox,
-                    timeout: configuration.build.timeout
+                    timeout: configuration.build.buildTimeout
                 )
                 await deps.reporter.report(.fallbackBuildFinished(filePath: file.originalPath, success: true))
             } catch {
