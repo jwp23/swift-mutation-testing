@@ -4,8 +4,6 @@ on:
   pull_request:
     branches: [ main ]
     types: [ opened, synchronize, reopened ]
-    paths-ignore:
-      - '**/*.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,7 +13,30 @@ permissions:
   contents: read
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      has-code-changes: ${{ steps.check.outputs.has-code-changes }}
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for non-Markdown changes
+        id: check
+        run: |
+          changed_files=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          if [ -n "$changed_files" ] && echo "$changed_files" | grep -qvi '\.md$'; then
+            echo "has-code-changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-code-changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
   validate-and-test:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has-code-changes == 'true'
     runs-on: macos-26
     timeout-minutes: 30
 
@@ -39,6 +60,8 @@ jobs:
         run: swift test --no-parallel
 
   two-run-race-test:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has-code-changes == 'true'
     runs-on: macos-26
     timeout-minutes: 30
 
