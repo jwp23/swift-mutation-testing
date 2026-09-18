@@ -656,4 +656,103 @@ struct IncompatibleMutantExecutorTests {
         let requests = await launcher.requests
         #expect(requests.last?.arguments == ["test", "--skip-build", "--filter", "AppTests"])
     }
+
+    @Test(
+        "Given SPM project type with different timeout and buildTimeout, when initial build called, then build is given buildTimeout"
+    )
+    func spmInitialBuildUsesCorrectBuildTimeout() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let sourceFile = dir.appendingPathComponent("Foo.swift")
+        try "let x = true".write(to: sourceFile, atomically: true, encoding: .utf8)
+
+        let launcher = BuildTimeoutTrackingMock()
+        let config = makeRunnerConfiguration(
+            projectPath: dir.path,
+            projectType: .spm,
+            timeout: 15,
+            buildTimeout: 850
+        )
+        let executor = IncompatibleMutantExecutor(
+            deps: makeExecutionDeps(
+                launcher: launcher,
+                cacheStorePath: dir.appendingPathComponent("cache.json").path
+            ),
+            sandboxFactory: SandboxFactory()
+        )
+        let pool = makeSimulatorPool()
+        try await pool.setUp()
+
+        let mutant = makeMutantDescriptor(
+            id: "m0",
+            filePath: sourceFile.path,
+            originalText: "a + b",
+            mutatedText: "a - b",
+            operatorIdentifier: "binaryOperator",
+            description: "Replace + with -",
+            mutatedSourceContent: "let x = 1"
+        )
+
+        _ = try await executor.execute(
+            [mutant],
+            configuration: config,
+            pool: pool
+        )
+
+        let buildTimeouts = await launcher.buildTimeouts
+        #expect(!buildTimeouts.isEmpty)
+        // The first build call should be the initial build in runSPMShared
+        #expect(buildTimeouts.first == 850)
+    }
+
+    @Test(
+        "Given SPM project type with per-mutant build and different timeout and buildTimeout, when per-mutant build called, then build is given buildTimeout"
+    )
+    func spmPerMutantBuildUsesCorrectBuildTimeout() async throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let sourceFile = dir.appendingPathComponent("Foo.swift")
+        try "let x = true".write(to: sourceFile, atomically: true, encoding: .utf8)
+
+        let launcher = BuildTimeoutTrackingMock()
+        let config = makeRunnerConfiguration(
+            projectPath: dir.path,
+            projectType: .spm,
+            timeout: 12,
+            buildTimeout: 900
+        )
+        let executor = IncompatibleMutantExecutor(
+            deps: makeExecutionDeps(
+                launcher: launcher,
+                cacheStorePath: dir.appendingPathComponent("cache.json").path
+            ),
+            sandboxFactory: SandboxFactory()
+        )
+        let pool = makeSimulatorPool()
+        try await pool.setUp()
+
+        let mutant = makeMutantDescriptor(
+            id: "m0",
+            filePath: sourceFile.path,
+            originalText: "a + b",
+            mutatedText: "a - b",
+            operatorIdentifier: "binaryOperator",
+            description: "Replace + with -",
+            mutatedSourceContent: "let x = 1"
+        )
+
+        _ = try await executor.execute(
+            [mutant],
+            configuration: config,
+            pool: pool
+        )
+
+        let buildTimeouts = await launcher.buildTimeouts
+        // Should have at least 2 build calls: initial build, then per-mutant build
+        #expect(buildTimeouts.count >= 2)
+        // Both should use the buildTimeout, not the test timeout
+        #expect(buildTimeouts.allSatisfy { $0 == 900 })
+    }
 }
