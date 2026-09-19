@@ -111,7 +111,7 @@ The Swift files mutation testing leaves alone: the tests themselves, the doubles
 
 **Test files** are whatever [`TestFileConvention.isTestFile(path:)`](09-reporting-infrastructure.md#infrastructuretestfileconventionswift) recognises — the tests themselves, the test-target directory heuristic, and test doubles. `TestFilesHasher` uses the same rule for cache invalidation, so discovery and the cache never disagree about which files carry mutants.
 
-**Build output directories** (always applied, regardless of configured `--exclude` patterns): `/.build/`, `/.swift-mutation-testing-derived-data/`, `/.swift-mutation-testing-cache/`, `/DerivedData/`. These are a discovery-scope concern only — a build artifact is not a test file — so they live here rather than in `TestFileConvention`.
+**Build output directories** (always applied, regardless of configured `--exclude` patterns): `/.build/`, `/.swift-mutation-testing-cache/`, `/DerivedData/`. These are a discovery-scope concern only — a build artifact is not a test file — so they live here rather than in `TestFileConvention`.
 
 Configured `--exclude` patterns are matched last, anywhere in the path.
 

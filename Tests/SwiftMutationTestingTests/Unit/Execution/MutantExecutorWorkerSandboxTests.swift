@@ -3,30 +3,33 @@ import Testing
 
 @testable import SwiftMutationTesting
 
-@Suite("MutantExecutor worker sandboxes")
-struct MutantExecutorWorkerSandboxTests {
+extension SandboxRootHookGlobalStateTests {
+    @Suite("MutantExecutor worker sandboxes")
+    struct MutantExecutorWorkerSandboxTests {
 
-    @Test(
-        "Given fewer mutants than workers, when the run is prepared, then it replicates no sandbox a mutant cannot use")
-    func sandboxReplicationIsLimitedByTheMutantCount() async throws {
-        let dir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(dir) }
-
-        let roots = SandboxRootCounter()
-        sandboxRootCreatedHook = { roots.increment() }
-        defer { sandboxRootCreatedHook = nil }
-
-        let executor = MutantExecutor(
-            configuration: makeRunnerConfiguration(projectPath: dir.path, projectType: .spm, concurrency: 8),
-            launcher: SPMBaselineMock()
+        @Test(
+            "Given fewer mutants than workers, when the run is prepared, then it replicates no sandbox a mutant cannot use"
         )
+        func sandboxReplicationIsLimitedByTheMutantCount() async throws {
+            let dir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(dir) }
 
-        let results = try await executor.execute(makeTwoMutantInput(in: dir))
+            let roots = SandboxRootCounter()
+            sandboxRootCreatedHook = { roots.increment() }
+            defer { sandboxRootCreatedHook = nil }
 
-        // The sandbox that was built plus one replica: two mutants can occupy two sandboxes, and
-        // the other six workers have nothing to run in a copy of the build directory.
-        #expect(results.count == 2)
-        #expect(roots.count == 2)
+            let executor = MutantExecutor(
+                configuration: makeRunnerConfiguration(projectPath: dir.path, projectType: .spm, concurrency: 8),
+                launcher: SPMBaselineMock()
+            )
+
+            let results = try await executor.execute(makeTwoMutantInput(in: dir))
+
+            // The sandbox that was built plus one replica: two mutants can occupy two sandboxes, and
+            // the other six workers have nothing to run in a copy of the build directory.
+            #expect(results.count == 2)
+            #expect(roots.count == 2)
+        }
     }
 }
 
