@@ -6,6 +6,9 @@ on:
     paths-ignore:
       - '**/*.md'
 
+permissions:
+  contents: read
+
 jobs:
   # Tests And Coverage
   test-and-coverage:
