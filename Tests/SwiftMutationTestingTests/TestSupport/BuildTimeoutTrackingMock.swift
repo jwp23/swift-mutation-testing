@@ -23,10 +23,10 @@ actor BuildTimeoutTrackingMock: ProcessLaunching {
         // Track build operations only, not test operations
         // - swift build / swift build --build-tests = build
         // - xcodebuild build-for-testing = build
-        let isBuild = (
-            (request.executableURL.lastPathComponent == "swift" && request.arguments.first == "build") ||
-            (request.executableURL.lastPathComponent == "xcodebuild" && request.arguments.first == "build-for-testing")
-        )
+        let isBuild =
+            ((request.executableURL.lastPathComponent == "swift" && request.arguments.first == "build")
+                || (request.executableURL.lastPathComponent == "xcodebuild"
+                    && request.arguments.first == "build-for-testing"))
         if isBuild {
             buildTimeouts.append(request.timeout)
             return (0, "")
