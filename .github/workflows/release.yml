@@ -35,32 +35,41 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VERSION_INPUT: ${{ github.event.inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+          if [ "$EVENT_NAME" == "workflow_dispatch" ]; then
+            VERSION="$VERSION_INPUT"
             [[ ! $VERSION =~ ^v ]] && VERSION="v$VERSION"
           else
-            VERSION="${{ github.ref_name }}"
+            VERSION="$REF_NAME"
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "artifact_name=swift-mutation-testing-$VERSION-macos.tar.gz" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=swift-mutation-testing-$VERSION-macos.tar.gz" >> "$GITHUB_OUTPUT"
 
       - name: Inject version
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          VERSION="${VERSION#v}"
+          VERSION="${RELEASE_VERSION#v}"
           sed -i '' "s/0.0.0-dev/$VERSION/" Sources/SwiftMutationTesting/Version.swift
 
       - name: Build
         run: swift build -c release
 
       - name: Package
+        env:
+          ARTIFACT_NAME: ${{ steps.version.outputs.artifact_name }}
         run: |
           mkdir -p release
           cp .build/release/swift-mutation-testing release/
-          cd release && tar -czf "${{ steps.version.outputs.artifact_name }}" swift-mutation-testing
+          cd release && tar -czf "$ARTIFACT_NAME" swift-mutation-testing
 
       - name: Upload artifact
-        run: gh release upload ${{ steps.version.outputs.version }} release/${{ steps.version.outputs.artifact_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          ARTIFACT_NAME: ${{ steps.version.outputs.artifact_name }}
+        run: gh release upload "$RELEASE_VERSION" "release/$ARTIFACT_NAME"
