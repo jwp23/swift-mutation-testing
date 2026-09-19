@@ -55,340 +55,350 @@ private func makePrimedNotificationPipe(notifications: Int) -> Int32 {
     return descriptors[0]
 }
 
-@Suite("SandboxCleaner")
-struct SandboxCleanerTests {
+/// Both `SandboxCleaner` test suites mutate the module-global registry, exit-handler stub, and
+/// signal dispositions that `SandboxCleaner.swift` owns. Nesting them here — rather than marking
+/// each `.serialized` independently — is required: Swift Testing only serializes across suites
+/// that share an actual parent, not across two independently-serialized top-level suites.
+@Suite("SandboxCleaner global state", .serialized)
+enum SandboxCleanerGlobalStateTests {}
 
-    @Test("Given orphaned xmr directories, when removeOrphaned called, then all are deleted")
-    func removeOrphanedDeletesXmrDirectories() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
+extension SandboxCleanerGlobalStateTests {
+    struct SandboxCleanerTests {
 
-        let orphan1 = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
-        let orphan2 = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: orphan1, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: orphan2, withIntermediateDirectories: true)
-        try "content".write(
-            to: orphan1.appendingPathComponent("file.swift"),
-            atomically: true, encoding: .utf8
-        )
+        @Test("Given orphaned xmr directories, when removeOrphaned called, then all are deleted")
+        func removeOrphanedDeletesXmrDirectories() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
 
-        SandboxCleaner.removeOrphaned(in: baseDir)
+            let orphan1 = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+            let orphan2 = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: orphan1, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: orphan2, withIntermediateDirectories: true)
+            try "content".write(
+                to: orphan1.appendingPathComponent("file.swift"),
+                atomically: true, encoding: .utf8
+            )
 
-        #expect(!FileManager.default.fileExists(atPath: orphan1.path))
-        #expect(!FileManager.default.fileExists(atPath: orphan2.path))
-    }
+            SandboxCleaner.removeOrphaned(in: baseDir)
 
-    @Test("Given non-xmr directories, when removeOrphaned called, then they are preserved")
-    func removeOrphanedPreservesNonXmrDirectories() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
-
-        let unrelated = baseDir.appendingPathComponent("other-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: unrelated, withIntermediateDirectories: true)
-
-        SandboxCleaner.removeOrphaned(in: baseDir)
-
-        #expect(FileManager.default.fileExists(atPath: unrelated.path))
-    }
-
-    @Test("Given orphaned xmr directories with nested content, when removeOrphaned called, then entire tree is removed")
-    func removeOrphanedDeletesNestedContent() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
-
-        let orphan = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
-        let nestedDir = orphan.appendingPathComponent("Sources/MyLib")
-        try FileManager.default.createDirectory(at: nestedDir, withIntermediateDirectories: true)
-        try "nested".write(
-            to: nestedDir.appendingPathComponent("File.swift"),
-            atomically: true, encoding: .utf8
-        )
-
-        SandboxCleaner.removeOrphaned(in: baseDir)
-
-        #expect(!FileManager.default.fileExists(atPath: orphan.path))
-    }
-
-    @Test("Given empty directory, when removeOrphaned called, then no error occurs")
-    func removeOrphanedOnEmptyDirectoryIsNoOp() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
-
-        SandboxCleaner.removeOrphaned(in: baseDir)
-    }
-
-    @Test("Given mixed xmr and non-xmr entries, when removeOrphaned called, then only xmr are removed")
-    func removeOrphanedDeletesOnlyXmrEntries() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
-
-        let xmrDir = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
-        let otherDir = baseDir.appendingPathComponent("something-else")
-        let regularFile = baseDir.appendingPathComponent("file.txt")
-        try FileManager.default.createDirectory(at: xmrDir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: otherDir, withIntermediateDirectories: true)
-        try "data".write(to: regularFile, atomically: true, encoding: .utf8)
-
-        SandboxCleaner.removeOrphaned(in: baseDir)
-
-        #expect(!FileManager.default.fileExists(atPath: xmrDir.path))
-        #expect(FileManager.default.fileExists(atPath: otherDir.path))
-        #expect(FileManager.default.fileExists(atPath: regularFile.path))
-    }
-
-    @Test("Given xmr directory owned by a live process, when removeOrphaned called, then it is preserved")
-    func removeOrphanedPreservesLiveOwnerDirectory() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
-
-        let liveProcess = Process()
-        liveProcess.executableURL = URL(fileURLWithPath: "/bin/sleep")
-        liveProcess.arguments = ["30"]
-        try liveProcess.run()
-        defer {
-            liveProcess.terminate()
-            liveProcess.waitUntilExit()
+            #expect(!FileManager.default.fileExists(atPath: orphan1.path))
+            #expect(!FileManager.default.fileExists(atPath: orphan2.path))
         }
 
-        let owned = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: owned, withIntermediateDirectories: true)
-        try String(liveProcess.processIdentifier).write(
-            to: owned.appendingPathComponent(SandboxFactory.ownerPidFileName),
-            atomically: true,
-            encoding: .utf8
+        @Test("Given non-xmr directories, when removeOrphaned called, then they are preserved")
+        func removeOrphanedPreservesNonXmrDirectories() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
+
+            let unrelated = baseDir.appendingPathComponent("other-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: unrelated, withIntermediateDirectories: true)
+
+            SandboxCleaner.removeOrphaned(in: baseDir)
+
+            #expect(FileManager.default.fileExists(atPath: unrelated.path))
+        }
+
+        @Test(
+            "Given orphaned xmr directories with nested content, when removeOrphaned called, then entire tree is removed"
         )
+        func removeOrphanedDeletesNestedContent() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
 
-        SandboxCleaner.removeOrphaned(in: baseDir)
+            let orphan = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+            let nestedDir = orphan.appendingPathComponent("Sources/MyLib")
+            try FileManager.default.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+            try "nested".write(
+                to: nestedDir.appendingPathComponent("File.swift"),
+                atomically: true, encoding: .utf8
+            )
 
-        #expect(FileManager.default.fileExists(atPath: owned.path))
-    }
+            SandboxCleaner.removeOrphaned(in: baseDir)
 
-    @Test("Given xmr directory owned by a dead process, when removeOrphaned called, then it is removed")
-    func removeOrphanedDeletesDeadOwnerDirectory() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
+            #expect(!FileManager.default.fileExists(atPath: orphan.path))
+        }
 
-        let deadProcess = Process()
-        deadProcess.executableURL = URL(fileURLWithPath: "/bin/sleep")
-        deadProcess.arguments = ["0"]
-        try deadProcess.run()
-        deadProcess.waitUntilExit()
-        let deadPid = deadProcess.processIdentifier
+        @Test("Given empty directory, when removeOrphaned called, then no error occurs")
+        func removeOrphanedOnEmptyDirectoryIsNoOp() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
 
-        let owned = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: owned, withIntermediateDirectories: true)
-        try String(deadPid).write(
-            to: owned.appendingPathComponent(SandboxFactory.ownerPidFileName),
-            atomically: true,
-            encoding: .utf8
+            SandboxCleaner.removeOrphaned(in: baseDir)
+        }
+
+        @Test("Given mixed xmr and non-xmr entries, when removeOrphaned called, then only xmr are removed")
+        func removeOrphanedDeletesOnlyXmrEntries() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
+
+            let xmrDir = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+            let otherDir = baseDir.appendingPathComponent("something-else")
+            let regularFile = baseDir.appendingPathComponent("file.txt")
+            try FileManager.default.createDirectory(at: xmrDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: otherDir, withIntermediateDirectories: true)
+            try "data".write(to: regularFile, atomically: true, encoding: .utf8)
+
+            SandboxCleaner.removeOrphaned(in: baseDir)
+
+            #expect(!FileManager.default.fileExists(atPath: xmrDir.path))
+            #expect(FileManager.default.fileExists(atPath: otherDir.path))
+            #expect(FileManager.default.fileExists(atPath: regularFile.path))
+        }
+
+        @Test("Given xmr directory owned by a live process, when removeOrphaned called, then it is preserved")
+        func removeOrphanedPreservesLiveOwnerDirectory() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
+
+            let liveProcess = Process()
+            liveProcess.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            liveProcess.arguments = ["30"]
+            try liveProcess.run()
+            defer {
+                liveProcess.terminate()
+                liveProcess.waitUntilExit()
+            }
+
+            let owned = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: owned, withIntermediateDirectories: true)
+            try String(liveProcess.processIdentifier).write(
+                to: owned.appendingPathComponent(SandboxFactory.ownerPidFileName),
+                atomically: true,
+                encoding: .utf8
+            )
+
+            SandboxCleaner.removeOrphaned(in: baseDir)
+
+            #expect(FileManager.default.fileExists(atPath: owned.path))
+        }
+
+        @Test("Given xmr directory owned by a dead process, when removeOrphaned called, then it is removed")
+        func removeOrphanedDeletesDeadOwnerDirectory() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
+
+            let deadProcess = Process()
+            deadProcess.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            deadProcess.arguments = ["0"]
+            try deadProcess.run()
+            deadProcess.waitUntilExit()
+            let deadPid = deadProcess.processIdentifier
+
+            let owned = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: owned, withIntermediateDirectories: true)
+            try String(deadPid).write(
+                to: owned.appendingPathComponent(SandboxFactory.ownerPidFileName),
+                atomically: true,
+                encoding: .utf8
+            )
+
+            SandboxCleaner.removeOrphaned(in: baseDir)
+
+            #expect(!FileManager.default.fileExists(atPath: owned.path))
+        }
+
+        @Test(
+            "Given xmr directory with a nonpositive owner-pid value, when removeOrphaned called, then it is removed",
+            arguments: ["0", "-1"]
         )
+        func removeOrphanedDeletesDirectoryWithNonpositiveOwnerPid(pidValue: String) throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
 
-        SandboxCleaner.removeOrphaned(in: baseDir)
+            let owned = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: owned, withIntermediateDirectories: true)
+            try pidValue.write(
+                to: owned.appendingPathComponent(SandboxFactory.ownerPidFileName),
+                atomically: true,
+                encoding: .utf8
+            )
 
-        #expect(!FileManager.default.fileExists(atPath: owned.path))
-    }
+            SandboxCleaner.removeOrphaned(in: baseDir)
 
-    @Test(
-        "Given xmr directory with a nonpositive owner-pid value, when removeOrphaned called, then it is removed",
-        arguments: ["0", "-1"]
-    )
-    func removeOrphanedDeletesDirectoryWithNonpositiveOwnerPid(pidValue: String) throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
+            #expect(!FileManager.default.fileExists(atPath: owned.path))
+        }
 
-        let owned = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: owned, withIntermediateDirectories: true)
-        try pidValue.write(
-            to: owned.appendingPathComponent(SandboxFactory.ownerPidFileName),
-            atomically: true,
-            encoding: .utf8
+        @Test("Given no active sandbox, when deregister called, then no error occurs")
+        func deregisterWithoutRegisterIsNoOp() {
+            SandboxCleaner.deregister()
+        }
+
+        @Test("Given registered sandbox, when cleanupActiveSandboxes called, then sandbox directory is removed")
+        func cleanupActiveSandboxesRemovesRegisteredDirectory() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            let sandboxDir = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
+            try "content".write(
+                to: sandboxDir.appendingPathComponent("file.swift"),
+                atomically: true, encoding: .utf8
+            )
+
+            let sandbox = Sandbox(rootURL: sandboxDir)
+            SandboxCleaner.register(sandbox)
+            SandboxCleaner.cleanupActiveSandboxes()
+
+            #expect(!FileManager.default.fileExists(atPath: sandboxDir.path))
+            FileHelpers.cleanup(baseDir)
+        }
+
+        @Test("Given no registered sandbox, when cleanupActiveSandboxes called, then no error occurs")
+        func cleanupActiveSandboxesWithoutRegistrationIsNoOp() {
+            SandboxCleaner.deregister()
+            SandboxCleaner.cleanupActiveSandboxes()
+        }
+
+        @Test("Given registered sandbox, when deregister called, then cleanupActiveSandboxes does not remove directory")
+        func deregisterPreventsCleanup() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
+
+            let sandboxDir = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
+
+            let sandbox = Sandbox(rootURL: sandboxDir)
+            SandboxCleaner.register(sandbox)
+            SandboxCleaner.deregister()
+            SandboxCleaner.cleanupActiveSandboxes()
+
+            #expect(FileManager.default.fileExists(atPath: sandboxDir.path))
+        }
+
+        @Test("Given several registered sandboxes, when cleanupActiveSandboxes called, then all of them are removed")
+        func everyRegisteredSandboxIsCleanedUp() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
+
+            let first = baseDir.appendingPathComponent("xmr-first")
+            let second = baseDir.appendingPathComponent("xmr-second")
+            try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+
+            SandboxCleaner.register(Sandbox(rootURL: first))
+            SandboxCleaner.register(Sandbox(rootURL: second))
+            SandboxCleaner.cleanupActiveSandboxes()
+
+            #expect(!FileManager.default.fileExists(atPath: first.path))
+            #expect(!FileManager.default.fileExists(atPath: second.path))
+        }
+
+        @Test(
+            "Given registered sandbox, when the installed handler fires, then sandbox is removed and exit handler called with 1",
+            arguments: [SIGINT, SIGTERM]
         )
+        func installedHandlerCleansSandboxAndExits(signalNumber: Int32) throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
 
-        SandboxCleaner.removeOrphaned(in: baseDir)
+            let sandboxDir = baseDir.appendingPathComponent("xmr-signal-\(signalNumber)")
+            try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
+            try "content".write(
+                to: sandboxDir.appendingPathComponent("file.swift"),
+                atomically: true, encoding: .utf8
+            )
 
-        #expect(!FileManager.default.fileExists(atPath: owned.path))
-    }
+            SandboxCleaner.register(Sandbox(rootURL: sandboxDir))
+            defer { SandboxCleaner.deregister() }
 
-    @Test("Given no active sandbox, when deregister called, then no error occurs")
-    func deregisterWithoutRegisterIsNoOp() {
-        SandboxCleaner.deregister()
-    }
+            let previousExit = sandboxCleanerExitHandler
+            resetRecordedExitCodes()
+            sandboxCleanerExitHandler = stubExitHandler
+            defer { sandboxCleanerExitHandler = previousExit }
 
-    @Test("Given registered sandbox, when cleanupActiveSandboxes called, then sandbox directory is removed")
-    func cleanupActiveSandboxesRemovesRegisteredDirectory() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        let sandboxDir = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
-        try "content".write(
-            to: sandboxDir.appendingPathComponent("file.swift"),
-            atomically: true, encoding: .utf8
+            installedHandler(for: signalNumber)(signalNumber)
+
+            #expect(waitForRecordedExitCodes(count: 1) == [1])
+            #expect(!FileManager.default.fileExists(atPath: sandboxDir.path))
+        }
+
+        @Test("Given no registered sandbox, when the installed handler fires, then exit handler is called with 1")
+        func installedHandlerWithNoSandboxStillExits() {
+            SandboxCleaner.deregister()
+
+            let previousExit = sandboxCleanerExitHandler
+            resetRecordedExitCodes()
+            sandboxCleanerExitHandler = stubExitHandler
+            defer { sandboxCleanerExitHandler = previousExit }
+
+            installedHandler(for: SIGINT)(SIGINT)
+
+            #expect(waitForRecordedExitCodes(count: 1) == [1])
+        }
+
+        @Test(
+            "Given a notification on the pipe, when the watcher drains it, then sandboxes are removed and exit handler called with 1"
         )
+        func signalNotificationDrivesCleanupAndExit() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
 
-        let sandbox = Sandbox(rootURL: sandboxDir)
-        SandboxCleaner.register(sandbox)
-        SandboxCleaner.cleanupActiveSandboxes()
+            let sandboxDir = baseDir.appendingPathComponent("xmr-notified")
+            try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
+            SandboxCleaner.register(Sandbox(rootURL: sandboxDir))
+            defer { SandboxCleaner.deregister() }
 
-        #expect(!FileManager.default.fileExists(atPath: sandboxDir.path))
-        FileHelpers.cleanup(baseDir)
-    }
+            let previousExit = sandboxCleanerExitHandler
+            resetRecordedExitCodes()
+            sandboxCleanerExitHandler = stubExitHandler
+            defer { sandboxCleanerExitHandler = previousExit }
 
-    @Test("Given no registered sandbox, when cleanupActiveSandboxes called, then no error occurs")
-    func cleanupActiveSandboxesWithoutRegistrationIsNoOp() {
-        SandboxCleaner.deregister()
-        SandboxCleaner.cleanupActiveSandboxes()
-    }
+            let reader = makePrimedNotificationPipe(notifications: 1)
+            defer { close(reader) }
+            SandboxCleaner.cleanUpOnSignalNotification(from: reader)
 
-    @Test("Given registered sandbox, when deregister called, then cleanupActiveSandboxes does not remove directory")
-    func deregisterPreventsCleanup() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
+            #expect(recordedExitCodes() == [1])
+            #expect(!FileManager.default.fileExists(atPath: sandboxDir.path))
+        }
 
-        let sandboxDir = baseDir.appendingPathComponent("xmr-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
-
-        let sandbox = Sandbox(rootURL: sandboxDir)
-        SandboxCleaner.register(sandbox)
-        SandboxCleaner.deregister()
-        SandboxCleaner.cleanupActiveSandboxes()
-
-        #expect(FileManager.default.fileExists(atPath: sandboxDir.path))
-    }
-
-    @Test("Given several registered sandboxes, when cleanupActiveSandboxes called, then all of them are removed")
-    func everyRegisteredSandboxIsCleanedUp() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
-
-        let first = baseDir.appendingPathComponent("xmr-first")
-        let second = baseDir.appendingPathComponent("xmr-second")
-        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
-
-        SandboxCleaner.register(Sandbox(rootURL: first))
-        SandboxCleaner.register(Sandbox(rootURL: second))
-        SandboxCleaner.cleanupActiveSandboxes()
-
-        #expect(!FileManager.default.fileExists(atPath: first.path))
-        #expect(!FileManager.default.fileExists(atPath: second.path))
-    }
-
-    @Test(
-        "Given registered sandbox, when the installed handler fires, then sandbox is removed and exit handler called with 1",
-        arguments: [SIGINT, SIGTERM]
-    )
-    func installedHandlerCleansSandboxAndExits(signalNumber: Int32) throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
-
-        let sandboxDir = baseDir.appendingPathComponent("xmr-signal-\(signalNumber)")
-        try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
-        try "content".write(
-            to: sandboxDir.appendingPathComponent("file.swift"),
-            atomically: true, encoding: .utf8
+        @Test(
+            "Given no notification before the pipe closes, when the watcher drains it, then nothing is cleaned up and no exit is requested"
         )
+        func closedNotificationPipeWithoutNotificationDoesNothing() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
 
-        SandboxCleaner.register(Sandbox(rootURL: sandboxDir))
-        defer { SandboxCleaner.deregister() }
+            let sandboxDir = baseDir.appendingPathComponent("xmr-unnotified")
+            try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
+            SandboxCleaner.register(Sandbox(rootURL: sandboxDir))
+            defer { SandboxCleaner.deregister() }
 
-        let previousExit = sandboxCleanerExitHandler
-        resetRecordedExitCodes()
-        sandboxCleanerExitHandler = stubExitHandler
-        defer { sandboxCleanerExitHandler = previousExit }
+            let previousExit = sandboxCleanerExitHandler
+            resetRecordedExitCodes()
+            sandboxCleanerExitHandler = stubExitHandler
+            defer { sandboxCleanerExitHandler = previousExit }
 
-        installedHandler(for: signalNumber)(signalNumber)
+            let reader = makePrimedNotificationPipe(notifications: 0)
+            defer { close(reader) }
+            SandboxCleaner.cleanUpOnSignalNotification(from: reader)
 
-        #expect(waitForRecordedExitCodes(count: 1) == [1])
-        #expect(!FileManager.default.fileExists(atPath: sandboxDir.path))
-    }
+            #expect(recordedExitCodes().isEmpty)
+            #expect(FileManager.default.fileExists(atPath: sandboxDir.path))
+        }
 
-    @Test("Given no registered sandbox, when the installed handler fires, then exit handler is called with 1")
-    func installedHandlerWithNoSandboxStillExits() {
-        SandboxCleaner.deregister()
+        @Test("Given a second notification, when the watcher drains it, then it is answered too")
+        func watcherAnswersEveryNotification() {
+            SandboxCleaner.deregister()
 
-        let previousExit = sandboxCleanerExitHandler
-        resetRecordedExitCodes()
-        sandboxCleanerExitHandler = stubExitHandler
-        defer { sandboxCleanerExitHandler = previousExit }
+            let previousExit = sandboxCleanerExitHandler
+            resetRecordedExitCodes()
+            sandboxCleanerExitHandler = stubExitHandler
+            defer { sandboxCleanerExitHandler = previousExit }
 
-        installedHandler(for: SIGINT)(SIGINT)
+            let reader = makePrimedNotificationPipe(notifications: 2)
+            defer { close(reader) }
+            SandboxCleaner.cleanUpOnSignalNotification(from: reader)
 
-        #expect(waitForRecordedExitCodes(count: 1) == [1])
-    }
+            #expect(recordedExitCodes() == [1, 1])
+        }
 
-    @Test(
-        "Given a notification on the pipe, when the watcher drains it, then sandboxes are removed and exit handler called with 1"
-    )
-    func signalNotificationDrivesCleanupAndExit() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
+        /// The handler `installSignalHandlers` put in place, read back from the process disposition
+        /// and restored. Calling it is the closest a test can get to the signal arriving without
+        /// actually interrupting the test process.
+        private func installedHandler(for signalNumber: Int32) -> @convention(c) (Int32) -> Void {
+            SandboxCleaner.installSignalHandlers()
+            let handler = signal(signalNumber, SIG_DFL)!
+            signal(signalNumber, handler)
 
-        let sandboxDir = baseDir.appendingPathComponent("xmr-notified")
-        try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
-        SandboxCleaner.register(Sandbox(rootURL: sandboxDir))
-        defer { SandboxCleaner.deregister() }
-
-        let previousExit = sandboxCleanerExitHandler
-        resetRecordedExitCodes()
-        sandboxCleanerExitHandler = stubExitHandler
-        defer { sandboxCleanerExitHandler = previousExit }
-
-        let reader = makePrimedNotificationPipe(notifications: 1)
-        defer { close(reader) }
-        SandboxCleaner.cleanUpOnSignalNotification(from: reader)
-
-        #expect(recordedExitCodes() == [1])
-        #expect(!FileManager.default.fileExists(atPath: sandboxDir.path))
-    }
-
-    @Test(
-        "Given no notification before the pipe closes, when the watcher drains it, then nothing is cleaned up and no exit is requested"
-    )
-    func closedNotificationPipeWithoutNotificationDoesNothing() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
-
-        let sandboxDir = baseDir.appendingPathComponent("xmr-unnotified")
-        try FileManager.default.createDirectory(at: sandboxDir, withIntermediateDirectories: true)
-        SandboxCleaner.register(Sandbox(rootURL: sandboxDir))
-        defer { SandboxCleaner.deregister() }
-
-        let previousExit = sandboxCleanerExitHandler
-        resetRecordedExitCodes()
-        sandboxCleanerExitHandler = stubExitHandler
-        defer { sandboxCleanerExitHandler = previousExit }
-
-        let reader = makePrimedNotificationPipe(notifications: 0)
-        defer { close(reader) }
-        SandboxCleaner.cleanUpOnSignalNotification(from: reader)
-
-        #expect(recordedExitCodes().isEmpty)
-        #expect(FileManager.default.fileExists(atPath: sandboxDir.path))
-    }
-
-    @Test("Given a second notification, when the watcher drains it, then it is answered too")
-    func watcherAnswersEveryNotification() {
-        SandboxCleaner.deregister()
-
-        let previousExit = sandboxCleanerExitHandler
-        resetRecordedExitCodes()
-        sandboxCleanerExitHandler = stubExitHandler
-        defer { sandboxCleanerExitHandler = previousExit }
-
-        let reader = makePrimedNotificationPipe(notifications: 2)
-        defer { close(reader) }
-        SandboxCleaner.cleanUpOnSignalNotification(from: reader)
-
-        #expect(recordedExitCodes() == [1, 1])
-    }
-
-    /// The handler `installSignalHandlers` put in place, read back from the process disposition
-    /// and restored. Calling it is the closest a test can get to the signal arriving without
-    /// actually interrupting the test process.
-    private func installedHandler(for signalNumber: Int32) -> @convention(c) (Int32) -> Void {
-        SandboxCleaner.installSignalHandlers()
-        let handler = signal(signalNumber, SIG_DFL)!
-        signal(signalNumber, handler)
-
-        return handler
+            return handler
+        }
     }
 }

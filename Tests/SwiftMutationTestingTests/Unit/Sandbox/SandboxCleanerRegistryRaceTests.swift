@@ -3,88 +3,91 @@ import Testing
 
 @testable import SwiftMutationTesting
 
-@Suite("SandboxCleaner registry concurrency")
-struct SandboxCleanerRegistryRaceTests {
+extension SandboxCleanerGlobalStateTests {
+    @Suite("SandboxCleaner registry concurrency")
+    struct SandboxCleanerRegistryRaceTests {
 
-    @Test("Given concurrent register and cleanup, when they interleave, then no sandbox root is lost or freed twice")
-    func concurrentRegisterAndCleanupStaysConsistent() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
+        @Test(
+            "Given concurrent register and cleanup, when they interleave, then no sandbox root is lost or freed twice")
+        func concurrentRegisterAndCleanupStaysConsistent() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
 
-        DispatchQueue.concurrentPerform(iterations: 200) { index in
-            let root = baseDir.appendingPathComponent("xmr-\(index)")
-            try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            SandboxCleaner.register(Sandbox(rootURL: root))
+            DispatchQueue.concurrentPerform(iterations: 200) { index in
+                let root = baseDir.appendingPathComponent("xmr-\(index)")
+                try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                SandboxCleaner.register(Sandbox(rootURL: root))
+                SandboxCleaner.cleanupActiveSandboxes()
+            }
+
             SandboxCleaner.cleanupActiveSandboxes()
+
+            let remaining = try FileManager.default.contentsOfDirectory(at: baseDir, includingPropertiesForKeys: nil)
+            #expect(remaining.isEmpty)
         }
 
-        SandboxCleaner.cleanupActiveSandboxes()
+        @Test(
+            "Given a sandbox registered after the registry is drained, when cleanup runs, then the straggler is removed too"
+        )
+        func cleanupRemovesSandboxRegisteredWhileItRuns() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
 
-        let remaining = try FileManager.default.contentsOfDirectory(at: baseDir, includingPropertiesForKeys: nil)
-        #expect(remaining.isEmpty)
-    }
+            let firstRoot = baseDir.appendingPathComponent("xmr-first")
+            let stragglerRoot = baseDir.appendingPathComponent("xmr-straggler")
+            try FileManager.default.createDirectory(at: firstRoot, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: stragglerRoot, withIntermediateDirectories: true)
 
-    @Test(
-        "Given a sandbox registered after the registry is drained, when cleanup runs, then the straggler is removed too"
-    )
-    func cleanupRemovesSandboxRegisteredWhileItRuns() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
+            SandboxCleaner.register(Sandbox(rootURL: firstRoot))
+            defer { SandboxCleaner.deregister() }
 
-        let firstRoot = baseDir.appendingPathComponent("xmr-first")
-        let stragglerRoot = baseDir.appendingPathComponent("xmr-straggler")
-        try FileManager.default.createDirectory(at: firstRoot, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: stragglerRoot, withIntermediateDirectories: true)
+            let straggler = StragglerRegistration(sandbox: Sandbox(rootURL: stragglerRoot))
+            sandboxRemovalPassCompletedHook = { straggler.registerOnce() }
+            defer { sandboxRemovalPassCompletedHook = nil }
 
-        SandboxCleaner.register(Sandbox(rootURL: firstRoot))
-        defer { SandboxCleaner.deregister() }
+            SandboxCleaner.cleanupActiveSandboxes()
 
-        let straggler = StragglerRegistration(sandbox: Sandbox(rootURL: stragglerRoot))
-        sandboxRemovalPassCompletedHook = { straggler.registerOnce() }
-        defer { sandboxRemovalPassCompletedHook = nil }
+            #expect(!FileManager.default.fileExists(atPath: firstRoot.path))
+            #expect(!FileManager.default.fileExists(atPath: stragglerRoot.path))
+        }
 
-        SandboxCleaner.cleanupActiveSandboxes()
+        @Test(
+            "Given a sandbox registered after the registry is drained, when the watcher answers a signal, then it is removed before the exit"
+        )
+        func signalCleanupRemovesSandboxRegisteredWhileItRuns() throws {
+            let baseDir = try FileHelpers.makeTemporaryDirectory()
+            defer { FileHelpers.cleanup(baseDir) }
 
-        #expect(!FileManager.default.fileExists(atPath: firstRoot.path))
-        #expect(!FileManager.default.fileExists(atPath: stragglerRoot.path))
-    }
+            let firstRoot = baseDir.appendingPathComponent("xmr-signal-first")
+            let stragglerRoot = baseDir.appendingPathComponent("xmr-signal-straggler")
+            try FileManager.default.createDirectory(at: firstRoot, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: stragglerRoot, withIntermediateDirectories: true)
 
-    @Test(
-        "Given a sandbox registered after the registry is drained, when the watcher answers a signal, then it is removed before the exit"
-    )
-    func signalCleanupRemovesSandboxRegisteredWhileItRuns() throws {
-        let baseDir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(baseDir) }
+            SandboxCleaner.register(Sandbox(rootURL: firstRoot))
+            defer { SandboxCleaner.deregister() }
 
-        let firstRoot = baseDir.appendingPathComponent("xmr-signal-first")
-        let stragglerRoot = baseDir.appendingPathComponent("xmr-signal-straggler")
-        try FileManager.default.createDirectory(at: firstRoot, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: stragglerRoot, withIntermediateDirectories: true)
+            let straggler = StragglerRegistration(sandbox: Sandbox(rootURL: stragglerRoot))
+            sandboxRemovalPassCompletedHook = { straggler.registerOnce() }
+            defer { sandboxRemovalPassCompletedHook = nil }
 
-        SandboxCleaner.register(Sandbox(rootURL: firstRoot))
-        defer { SandboxCleaner.deregister() }
+            let previousExit = sandboxCleanerExitHandler
+            watchRootAtExit(stragglerRoot.path)
+            sandboxCleanerExitHandler = { _ in recordWatchedRootAtExit() }
+            defer { sandboxCleanerExitHandler = previousExit }
 
-        let straggler = StragglerRegistration(sandbox: Sandbox(rootURL: stragglerRoot))
-        sandboxRemovalPassCompletedHook = { straggler.registerOnce() }
-        defer { sandboxRemovalPassCompletedHook = nil }
+            var descriptors: [Int32] = [-1, -1]
+            _ = pipe(&descriptors)
+            var notification: UInt8 = 1
+            _ = write(descriptors[1], &notification, 1)
+            close(descriptors[1])
+            defer { close(descriptors[0]) }
 
-        let previousExit = sandboxCleanerExitHandler
-        watchRootAtExit(stragglerRoot.path)
-        sandboxCleanerExitHandler = { _ in recordWatchedRootAtExit() }
-        defer { sandboxCleanerExitHandler = previousExit }
+            SandboxCleaner.cleanUpOnSignalNotification(from: descriptors[0])
 
-        var descriptors: [Int32] = [-1, -1]
-        _ = pipe(&descriptors)
-        var notification: UInt8 = 1
-        _ = write(descriptors[1], &notification, 1)
-        close(descriptors[1])
-        defer { close(descriptors[0]) }
-
-        SandboxCleaner.cleanUpOnSignalNotification(from: descriptors[0])
-
-        // What the exit handler saw is what a real run would have left behind when `_exit` fired.
-        #expect(watchedRootExistedAtExit() == false)
-        #expect(!FileManager.default.fileExists(atPath: firstRoot.path))
+            // What the exit handler saw is what a real run would have left behind when `_exit` fired.
+            #expect(watchedRootExistedAtExit() == false)
+            #expect(!FileManager.default.fileExists(atPath: firstRoot.path))
+        }
     }
 }
 

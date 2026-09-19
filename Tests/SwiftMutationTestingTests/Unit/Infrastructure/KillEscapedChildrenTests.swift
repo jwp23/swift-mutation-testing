@@ -95,11 +95,16 @@ struct KillEscapedChildrenTests {
 
         // mutant2's own argv contains the sandbox path (its script lives inside the sandbox),
         // exactly like a real mutant's compiled test binary path does.
+        //
+        // Timeout is generously wider than the ~6s the script actually takes: this ceiling only
+        // needs to avoid firing on its own, not measure anything, and a tight margin here was
+        // observed to fail under heavy concurrent CPU load (many other swift build/test
+        // processes) even though the collateral-kill behavior under test was unaffected.
         async let mutant2: Int32 = launcher.launch(
             executableURL: URL(fileURLWithPath: "/bin/sh"),
             arguments: [scriptURL.path],
             workingDirectoryURL: sandboxURL,
-            timeout: 10
+            timeout: 30
         )
 
         let mutant1ExitCode = try await mutant1
