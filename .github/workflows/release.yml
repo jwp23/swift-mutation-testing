@@ -46,6 +46,14 @@ jobs:
           else
             VERSION="$REF_NAME"
           fi
+          # Reject anything that is not vMAJOR.MINOR.PATCH[-prerelease]: the version is
+          # interpolated into a sed replacement, a filename and a release tag downstream, and
+          # the allowed characters carry no special meaning in any of them.
+          VERSION_PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+          if [[ ! $VERSION =~ $VERSION_PATTERN ]]; then
+            echo "::error::Release version '$VERSION' is not of the form vMAJOR.MINOR.PATCH[-prerelease]"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "artifact_name=swift-mutation-testing-$VERSION-macos.tar.gz" >> "$GITHUB_OUTPUT"
 
