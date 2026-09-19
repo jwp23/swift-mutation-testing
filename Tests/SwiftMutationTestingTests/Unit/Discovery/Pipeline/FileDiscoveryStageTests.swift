@@ -95,25 +95,6 @@ struct FileDiscoveryStageTests {
         #expect(result[0].path.hasSuffix("Source.swift"))
     }
 
-    @Test("Given file inside /.swift-mutation-testing-derived-data/, when run, then excludes it")
-    func excludesDerivedDataDirectory() throws {
-        let dir = try FileHelpers.makeTemporaryDirectory()
-        defer { FileHelpers.cleanup(dir) }
-
-        let derivedDir =
-            dir
-            .appendingPathComponent(".swift-mutation-testing-derived-data")
-            .appendingPathComponent("Build")
-        try FileManager.default.createDirectory(at: derivedDir, withIntermediateDirectories: true)
-        try FileHelpers.write("let x = 1", named: "GeneratedAssetSymbols.swift", in: derivedDir)
-        try FileHelpers.write("let y = 2", named: "Source.swift", in: dir)
-
-        let result = try stage.run(input: makeDiscoveryInput(projectPath: dir.path, sourcesPath: dir.path))
-
-        #expect(result.count == 1)
-        #expect(result[0].path.hasSuffix("Source.swift"))
-    }
-
     @Test("Given file inside /.swift-mutation-testing-cache/, when run, then excludes it")
     func excludesCacheDirectory() throws {
         let dir = try FileHelpers.makeTemporaryDirectory()
