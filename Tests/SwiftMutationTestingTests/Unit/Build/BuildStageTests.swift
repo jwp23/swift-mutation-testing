@@ -10,7 +10,7 @@ struct BuildStageTests {
         let projectDir = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(projectDir) }
 
-        let productsDir = projectDir.appendingPathComponent(".xmr-derived-data/Build/Products")
+        let productsDir = projectDir.appendingPathComponent(".derived-data/Build/Products")
         try FileManager.default.createDirectory(at: productsDir, withIntermediateDirectories: true)
 
         let plistData = try PropertyListSerialization.data(
@@ -30,7 +30,7 @@ struct BuildStageTests {
             timeout: 60
         )
 
-        #expect(artifact.derivedDataPath == projectDir.appendingPathComponent(".xmr-derived-data").path)
+        #expect(artifact.derivedDataPath == projectDir.appendingPathComponent(".derived-data").path)
         #expect(artifact.xctestrunURL?.lastPathComponent == "App.xctestrun")
     }
 
@@ -64,7 +64,7 @@ struct BuildStageTests {
             at: projectDir.appendingPathComponent("MyApp.xcworkspace"),
             withIntermediateDirectories: true
         )
-        let productsDir = projectDir.appendingPathComponent(".xmr-derived-data/Build/Products")
+        let productsDir = projectDir.appendingPathComponent(".derived-data/Build/Products")
         try FileManager.default.createDirectory(at: productsDir, withIntermediateDirectories: true)
 
         let plistData = try PropertyListSerialization.data(
@@ -92,7 +92,7 @@ struct BuildStageTests {
             at: projectDir.appendingPathComponent("MyApp.xcodeproj"),
             withIntermediateDirectories: true
         )
-        let productsDir = projectDir.appendingPathComponent(".xmr-derived-data/Build/Products")
+        let productsDir = projectDir.appendingPathComponent(".derived-data/Build/Products")
         try FileManager.default.createDirectory(at: productsDir, withIntermediateDirectories: true)
 
         let plistData = try PropertyListSerialization.data(
@@ -116,7 +116,7 @@ struct BuildStageTests {
         let projectDir = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(projectDir) }
 
-        let productsDir = projectDir.appendingPathComponent(".xmr-derived-data/Build/Products")
+        let productsDir = projectDir.appendingPathComponent(".derived-data/Build/Products")
         try FileManager.default.createDirectory(at: productsDir, withIntermediateDirectories: true)
         try Data("not a plist".utf8).write(to: productsDir.appendingPathComponent("App.xctestrun"))
 
@@ -135,7 +135,7 @@ struct BuildStageTests {
         let projectDir = try FileHelpers.makeTemporaryDirectory()
         defer { FileHelpers.cleanup(projectDir) }
 
-        let productsDir = projectDir.appendingPathComponent(".xmr-derived-data/Build/Products")
+        let productsDir = projectDir.appendingPathComponent(".derived-data/Build/Products")
         try FileManager.default.createDirectory(at: productsDir, withIntermediateDirectories: true)
 
         let sandbox = Sandbox(rootURL: projectDir)
