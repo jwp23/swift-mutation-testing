@@ -321,6 +321,30 @@ struct KillEscapedChildrenTests {
         #expect(Set(result.map(\.pid)) == [500_001, 500_002])
     }
 
+    @Test(
+        "Given a descendant that only becomes visible some time after the freeze starts, when frozenDescendantPIDs walks, then it is still discovered and returned"
+    )
+    func frozenDescendantPIDsWaitsForForksAlreadyInFlight() {
+        // A fork the kernel accepted before SIGSTOP landed still completes, and its child is
+        // invisible to a process-table walk until that fork finishes — measured at up to 27ms
+        // after the child's recorded start time on a ten-core machine at load average 12, against
+        // 1.5ms on the same machine idle. Walking again with no pause in between cannot see such a
+        // child, so the walk has to pause before concluding the tree is quiescent.
+        //
+        // Fake pids chosen above Darwin's PID_MAX (99999), so the real kill(2) calls this
+        // exercises are always ESRCH against them — never able to collide with, let alone signal,
+        // an actual process on the machine running this test.
+        let early = DescendantSnapshot(pid: 500_001, startTime: timeval(tv_sec: 1, tv_usec: 0))
+        let late = DescendantSnapshot(pid: 500_002, startTime: timeval(tv_sec: 2, tv_usec: 0))
+        let lateBecomesVisible = Date().addingTimeInterval(0.05)
+
+        let result = frozenDescendantPIDs(of: 500_000) { _ in
+            Date() < lateBecomesVisible ? [early] : [early, late]
+        }
+
+        #expect(Set(result.map(\.pid)) == [500_001, 500_002])
+    }
+
     private func readPID(from url: URL, timeout: TimeInterval = 2) async throws -> Int32 {
         // Poll until the content parses, not until the file exists: each writer (shell
         // redirection, or Perl's open(">") followed by a separate print) makes the path visible
