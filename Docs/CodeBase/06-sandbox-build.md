@@ -156,7 +156,7 @@ Runs a single build inside the sandbox.
 
 ```mermaid
 flowchart TD
-    A[xcodebuild build-for-testing\n-scheme -destination\n-derivedDataPath sandbox/.xmr-derived-data] --> B{exit code?}
+    A[xcodebuild build-for-testing\n-scheme -destination\n-derivedDataPath sandbox/.derived-data] --> B{exit code?}
     B -- non-zero --> FAIL[throw BuildError.compilationFailed]
     B -- 0 --> C[search Build/Products for .xctestrun]
     C -- not found --> NFE[throw BuildError.xctestrunNotFound]
@@ -170,7 +170,7 @@ Auto-detects project format: prefers `-workspace` if a `.xcworkspace` exists, fa
 
 **SPM path (`buildSPM`):** Runs `swift build --build-tests` in the sandbox directory, then lists the `.xctest` bundles SwiftPM linked into `.build/debug` (resolving that symlink, which directory enumeration does not follow). Returns a `BuildArtifact` carrying those bundle paths relative to the sandbox root; a build that produces no bundle throws `BuildError.testBundleNotFound`.
 
-Derived data is placed at `<sandbox>/.xmr-derived-data` to keep it inside the sandbox directory.
+Derived data is placed at `<sandbox>/.derived-data` to keep it inside the sandbox directory.
 
 ---
 
