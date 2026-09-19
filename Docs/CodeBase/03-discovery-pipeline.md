@@ -109,11 +109,9 @@ struct SourceFileExclusion: Sendable {
 
 The Swift files mutation testing leaves alone: the tests themselves, the doubles that support them, and anything a build produced. `FileDiscoveryStage` and `ScopeResolver`'s test-file classification (see [Scope Resolution](#scope-resolution)) both use it — which also makes this the rule that tells a changed test file from a changed source file when resolving scope.
 
-**Fixed patterns** (always applied, regardless of configured `--exclude` patterns):
+**Test files** are whatever [`TestFileConvention.isTestFile(path:)`](09-reporting-infrastructure.md#infrastructuretestfileconventionswift) recognises — the tests themselves, the test-target directory heuristic, and test doubles. `TestFilesHasher` uses the same rule for cache invalidation, so discovery and the cache never disagree about which files carry mutants.
 
-`/Mocks/`, `/Stubs/`, `/Fakes/`, `/TestHelpers/`, `/TestSupport/`, `Tests.swift` (suffix), `Mock.swift` (suffix), `Spec.swift` (suffix), `/.build/`, `/.swift-mutation-testing-derived-data/`, `/.swift-mutation-testing-cache/`, `/DerivedData/`
-
-**Test-directory heuristic** (`isInTestDirectory`): a path is excluded if any directory it passes through is a test target by convention — named exactly `Tests`, or a project's own name followed by it, such as `AppTests` or `ProjectTests`. A component ending in `Tests` doesn't count if an earlier (closer-to-root) component is literally `Sources`, which marks a source-code feature directory that happens to end in "Tests" (`Sources/ABTests/`, `Sources/Analytics/ExperimentTests/`) rather than a test target; a component that is exactly `Tests` always counts regardless of a `Sources` ancestor, though that combination shouldn't arise in practice. This is a path-based heuristic with no real target list to check against — a project checked out under a directory that happens to be named `Sources` for unrelated reasons could still be misclassified, an accepted tradeoff.
+**Build output directories** (always applied, regardless of configured `--exclude` patterns): `/.build/`, `/.swift-mutation-testing-derived-data/`, `/.swift-mutation-testing-cache/`, `/DerivedData/`. These are a discovery-scope concern only — a build artifact is not a test file — so they live here rather than in `TestFileConvention`.
 
 Configured `--exclude` patterns are matched last, anywhere in the path.
 

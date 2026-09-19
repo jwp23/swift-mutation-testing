@@ -34,4 +34,29 @@ struct SourceFileExclusionTests {
     func doesNotExcludeNestedSourceFeatureDirectory() {
         #expect(!exclusion.excludes(path: "Sources/Analytics/ExperimentTests/Foo.swift"))
     }
+
+    @Test("Given a test-double directory outside any test target, when excludes, then returns true")
+    func excludesTestDoubleDirectory() {
+        #expect(exclusion.excludes(path: "Sources/Support/Mocks/Network.swift"))
+    }
+
+    @Test("Given a file named after a test double, when excludes, then returns true")
+    func excludesTestDoubleFileName() {
+        #expect(exclusion.excludes(path: "Sources/Payments/PaymentGatewayMock.swift"))
+    }
+
+    @Test("Given a path inside build output, when excludes, then returns true")
+    func excludesBuildOutput() {
+        #expect(exclusion.excludes(path: "Sources/.build/checkouts/Package/Foo.swift"))
+    }
+
+    @Test("Given a configured exclude pattern matching the path, when excludes, then returns true")
+    func excludesConfiguredPattern() {
+        #expect(SourceFileExclusion(patterns: ["Generated"]).excludes(path: "Sources/App/GeneratedModel.swift"))
+    }
+
+    @Test("Given an ordinary source file, when excludes, then returns false")
+    func doesNotExcludeOrdinarySourceFile() {
+        #expect(!exclusion.excludes(path: "Sources/App/Login.swift"))
+    }
 }

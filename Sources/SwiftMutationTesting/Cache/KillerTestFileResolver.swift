@@ -1,7 +1,16 @@
 import Foundation
 
+/// The file a named test was declared in. Callers hand it every file that belongs to the tests,
+/// including the doubles and shared helpers among them; only the files that declare tests are
+/// candidates, since a name is matched by reading content and a double is free to contain a
+/// function of the same name as the test that uses it.
 struct KillerTestFileResolver: Sendable {
-    let testFilePaths: [String]
+
+    init(testFilePaths: [String]) {
+        self.candidatePaths = testFilePaths.filter(TestFileConvention.declaresTests(path:))
+    }
+
+    private let candidatePaths: [String]
 
     func resolve(testName: String) -> String? {
         if let path = resolveXCTestClassName(testName) {
@@ -27,7 +36,7 @@ struct KillerTestFileResolver: Sendable {
         }
 
         let fileName = "\(className).swift"
-        return testFilePaths.first { $0.hasSuffix("/\(fileName)") || $0 == fileName }
+        return candidatePaths.first { $0.hasSuffix("/\(fileName)") || $0 == fileName }
     }
 
     private func resolveSwiftTestingFunctionName(_ testName: String) -> String? {
@@ -36,7 +45,7 @@ struct KillerTestFileResolver: Sendable {
 
         let functionName = String(lastComponent)
 
-        for path in testFilePaths {
+        for path in candidatePaths {
             guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
 
             if content.contains("func \(functionName)")

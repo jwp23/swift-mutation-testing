@@ -598,7 +598,28 @@ Provides per-file test hashing and test file path enumeration for granular cache
 | `hashPerFile(projectPath:)` | Returns a dictionary mapping relative test file paths to their SHA256 content hashes. Symlinks pointing outside the project root use absolute paths as keys to avoid collisions |
 | `testFilePaths(projectPath:)` | Returns all test file paths in the project, as absolute filesystem paths (unlike `hashPerFile`'s relativized keys) |
 
-**Test file collection:** walks `projectPath` recursively (skipping hidden files) and includes every `.swift` file where any path component (not just the immediate parent directory) ends with `Tests`, or whose filename ends with `Tests.swift`. This is a separate heuristic from `SourceFileExclusion.isInTestDirectory`; the two are not guaranteed to agree on every file.
+**Test file collection:** walks `projectPath` recursively (skipping hidden files) and includes every `.swift` file `TestFileConvention.isTestFile(path:)` recognises — the same rule discovery excludes by, so the set hashed here is exactly the set that carries no mutants.
+
+---
+
+## Infrastructure/TestFileConvention.swift
+
+```swift
+enum TestFileConvention {
+    static func isTestFile(path: String) -> Bool
+    static func declaresTests(path: String) -> Bool
+}
+```
+
+Whether a Swift file belongs to a project's tests rather than its mutable source: the tests themselves and the doubles that support them, recognised from the path alone. The single answer to that question — `SourceFileExclusion` skips these files during discovery so they carry no mutants, and `TestFilesHasher` hashes exactly the same set for cache invalidation.
+
+**Patterns:** test cases are `Tests.swift` and `Spec.swift` (suffix); doubles and shared helpers are `Mock.swift` (suffix) and `/Mocks/`, `/Stubs/`, `/Fakes/`, `/TestHelpers/`, `/TestSupport/` (anywhere in the path). `isTestFile(path:)` matches either group or the test-directory heuristic below.
+
+`declaresTests(path:)` is the narrower question `KillerTestFileResolver` asks: of the files that belong to the tests, which can hold a test at all. It is `isTestFile(path:)` minus the doubles and shared helpers — those declare no test, so naming one as a mutant's `killerTestFile` on a coincidental text match would leave the cache watching a file that can never change the verdict. `Spec.swift` stays eligible: a Quick-style spec declares tests.
+
+**Test-directory heuristic:** a path is a test path if any directory it passes through is a test target by convention — named exactly `Tests`, or a project's own name followed by it, such as `AppTests` or `ProjectTests`. A component ending in `Tests` doesn't count if an earlier (closer-to-root) component is literally `Sources`, which marks a source-code feature directory that happens to end in "Tests" (`Sources/ABTests/`, `Sources/Analytics/ExperimentTests/`) rather than a test target; a component that is exactly `Tests` always counts regardless of a `Sources` ancestor, though that combination shouldn't arise in practice. This is a path-based heuristic with no real target list to check against — a project checked out under a directory that happens to be named `Sources` for unrelated reasons could still be misclassified, an accepted tradeoff. Note the tradeoff's scope: because `TestFilesHasher` walks absolute paths, a checkout under a directory literally named `Sources` (`/Users/me/Sources/Proj/ProjTests/Helper.swift`) drops those files from `testFileHashes` and from killer-test resolution as well as from discovery — editing such a test would not invalidate its cached results.
+
+Build output is deliberately not covered here: skipping `.build/` or derived data is about where discovery may walk, not about what a test file is, so those patterns stay in `SourceFileExclusion`.
 
 ---
 
