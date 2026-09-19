@@ -11,7 +11,6 @@ struct SourceFileExclusion: Sendable {
     /// own. Unlike the test-file rules this is purely about where discovery may walk.
     private static let buildOutputDirectories: [String] = [
         "/.build/",
-        "/.swift-mutation-testing-derived-data/",
         "/\(CacheStore.directoryName)/",
         "/DerivedData/",
     ]
