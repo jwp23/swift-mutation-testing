@@ -262,14 +262,16 @@ Represents changes to test files between cache runs. Produced by `CacheStore.cha
 
 ```swift
 struct KillerTestFileResolver: Sendable {
-    let testFilePaths: [String]
+    init(testFilePaths: [String])
     func resolve(testName: String) -> String?
 }
 ```
 
 Maps killer test names back to their source file paths. Supports both XCTest class names (e.g. `CalculatorTests`) and Swift Testing function names (e.g. `addReturnsSum()`).
 
-Resolution strategy: extracts the class or function name from the test name, then searches `testFilePaths` for a file whose name contains the extracted identifier.
+Resolution strategy: extracts the class or function name from the test name, then searches the candidate files for one whose name contains the extracted identifier (XCTest) or whose content declares it (Swift Testing).
+
+Callers pass every file that belongs to the tests — `MutantExecutor` from `TestFilesHasher.testFilePaths`, `BaselineReport` from the changed files a scope names. The initialiser keeps only those [`TestFileConvention.declaresTests(path:)`](09-reporting-infrastructure.md#infrastructuretestfileconventionswift) accepts: the Swift Testing strategy matches on file content, and a double is free to declare a function named after the test that uses it, which would otherwise be recorded as the mutant's `killerTestFile` and watched for changes in place of the real test.
 
 ---
 

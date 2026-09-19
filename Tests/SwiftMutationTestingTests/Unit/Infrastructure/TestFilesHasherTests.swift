@@ -85,6 +85,51 @@ struct TestFilesHasherTests {
         #expect(!key.hasPrefix("Tests/"))
     }
 
+    @Test(
+        "Given a source feature directory ending in Tests under Sources, when hashPerFile called, then it is excluded")
+    func hashPerFileExcludesSourceFeatureDirectoryEndingInTests() throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let featureDir = dir.appendingPathComponent("Sources/Analytics/ExperimentTests")
+        try FileManager.default.createDirectory(at: featureDir, withIntermediateDirectories: true)
+        try FileHelpers.write("let x = 1", named: "Helper.swift", in: featureDir)
+
+        let result = TestFilesHasher().hashPerFile(projectPath: dir.path)
+
+        #expect(result.isEmpty)
+    }
+
+    @Test("Given a Mock-suffixed file outside any test directory, when hashPerFile called, then it is included")
+    func hashPerFileIncludesMockSuffixedFile() throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let sourcesDir = dir.appendingPathComponent("Sources/Payments")
+        try FileManager.default.createDirectory(at: sourcesDir, withIntermediateDirectories: true)
+        try FileHelpers.write("let m = 1", named: "PaymentGatewayMock.swift", in: sourcesDir)
+
+        let result = TestFilesHasher().hashPerFile(projectPath: dir.path)
+
+        #expect(result.keys.contains("Sources/Payments/PaymentGatewayMock.swift"))
+    }
+
+    @Test(
+        "Given a file in a TestHelpers directory outside any test directory, when hashPerFile called, then it is included"
+    )
+    func hashPerFileIncludesTestHelpersDirectoryFile() throws {
+        let dir = try FileHelpers.makeTemporaryDirectory()
+        defer { FileHelpers.cleanup(dir) }
+
+        let helpersDir = dir.appendingPathComponent("Support/TestHelpers")
+        try FileManager.default.createDirectory(at: helpersDir, withIntermediateDirectories: true)
+        try FileHelpers.write("let h = 1", named: "Helper.swift", in: helpersDir)
+
+        let result = TestFilesHasher().hashPerFile(projectPath: dir.path)
+
+        #expect(result.keys.contains("Support/TestHelpers/Helper.swift"))
+    }
+
     @Test("Given non-existent path, when hashPerFile called, then empty map is returned")
     func hashPerFileReturnsEmptyForNonExistentPath() {
         let result = TestFilesHasher().hashPerFile(projectPath: "/nonexistent/path/xyz")
